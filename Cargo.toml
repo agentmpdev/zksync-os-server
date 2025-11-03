@@ -72,8 +72,11 @@ zk_os_forward_system_0_0_26 = { package = "forward_system", git = "https://githu
     "evm-compatibility",
     "no_print",
 ] }
+# Dependency on `zk_ee_0_0_26` and `zk_os_basic_system_0_0_26` can be removed after server doesn't have to prove blocks <= V3.
+# After they're removed you'll see where they were used and should be able to clean it up there.
 zk_ee_0_0_26 = { package = "zk_ee", git = "https://github.com/matter-labs/zksync-os", tag = "v0.0.26-rc1" }
 zk_os_basic_system_0_0_26 = { package = "basic_system", git = "https://github.com/matter-labs/zksync-os", tag = "v0.0.26-rc1" }
+
 zk_os_forward_system = { package = "forward_system", git = "https://github.com/matter-labs/zksync-os", tag = "v0.1.0", features = [
     "production",
     "no_print",
