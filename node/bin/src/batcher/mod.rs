@@ -18,6 +18,7 @@ use zksync_os_observability::{
 };
 use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
 use zksync_os_storage_api::ReplayRecord;
+use zksync_os_types::PubdataMode;
 
 mod batch_builder;
 mod seal_criteria;
@@ -36,6 +37,7 @@ pub struct Batcher {
     pub pubdata_limit_bytes: u64,
     pub batcher_config: BatcherConfig,
     pub prev_batch_info: StoredBatchInfo,
+    pub pubdata_mode: PubdataMode,
 }
 
 #[async_trait]
@@ -212,6 +214,7 @@ impl Batcher {
             batch_number,
             self.chain_id,
             self.chain_address,
+            self.pubdata_mode,
         )?;
         self.prev_batch_info = batch_envelope.batch.batch_info.clone().into_stored();
         Ok(batch_envelope)

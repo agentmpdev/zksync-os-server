@@ -1,24 +1,20 @@
 use crate::batcher_metrics::BatchExecutionStage;
 use crate::batcher_model::{BatchEnvelope, FriProof};
 use crate::commands::L1SenderCommand;
+use alloy::consensus::BlobTransactionSidecar;
 use alloy::primitives::U256;
 use alloy::sol_types::{SolCall, SolValue};
 use std::fmt::Display;
 use zksync_os_contract_interface::IExecutor;
-use zksync_os_contract_interface::models::BatchDaInputMode;
 
 #[derive(Debug)]
 pub struct CommitCommand {
     input: BatchEnvelope<FriProof>,
-    da_input_mode: BatchDaInputMode,
 }
 
 impl CommitCommand {
-    pub fn new(input: BatchEnvelope<FriProof>, da_input_mode: BatchDaInputMode) -> Self {
-        Self {
-            input,
-            da_input_mode,
-        }
+    pub fn new(input: BatchEnvelope<FriProof>) -> Self {
+        Self { input }
     }
 }
 
@@ -33,6 +29,10 @@ impl L1SenderCommand for CommitCommand {
             U256::from(self.input.batch_number()),
             self.to_calldata_suffix().into(),
         ))
+    }
+
+    fn blob_sidecar(&self) -> BlobTransactionSidecar {
+        self.input.batch.batch_info.blob_sidecar.clone()
     }
 }
 
@@ -70,15 +70,10 @@ impl CommitCommand {
 
         let stored_batch_info =
             IExecutor::StoredBatchInfo::from(&self.input.batch.previous_stored_batch_info);
-        let mut batch_info = self.input.batch.batch_info.clone();
-        // `BatchInfo` has full da input - even for validium chains we only drop `operator_da_input`
-        // field when we are actually committing the batch this way, we don't need to consider the DA
-        // mode in advance - it's only known to the l1-sender.
-        batch_info.commit_info.operator_da_input = match self.da_input_mode {
-            BatchDaInputMode::Rollup => batch_info.commit_info.operator_da_input,
-            BatchDaInputMode::Validium => U256::ZERO.to_be_bytes_vec(),
-        };
-        let commit_batch_info = IExecutor::CommitBatchInfoZKsyncOS::from(batch_info.commit_info);
+
+        let commit_batch_info = IExecutor::CommitBatchInfoZKsyncOS::from(
+            self.input.batch.batch_info.commit_info.clone(),
+        );
         tracing::debug!(
             last_batch_hash = ?self.input.batch.previous_stored_batch_info.hash(),
             last_batch_number = ?self.input.batch.previous_stored_batch_info.batch_number,

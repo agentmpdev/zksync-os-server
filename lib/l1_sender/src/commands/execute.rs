@@ -1,6 +1,7 @@
 use crate::batcher_metrics::BatchExecutionStage;
 use crate::batcher_model::{BatchEnvelope, FriProof};
 use crate::commands::L1SenderCommand;
+use alloy::consensus::BlobTransactionSidecar;
 use alloy::primitives::U256;
 use alloy::sol_types::{SolCall, SolValue};
 use std::fmt::Display;
@@ -38,6 +39,10 @@ impl L1SenderCommand for ExecuteCommand {
             U256::from(self.batches.last().unwrap().batch_number()),
             self.to_calldata_suffix().into(),
         ))
+    }
+
+    fn blob_sidecar(&self) -> BlobTransactionSidecar {
+        BlobTransactionSidecar::default()
     }
 }
 

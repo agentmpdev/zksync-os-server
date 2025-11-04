@@ -9,7 +9,6 @@ use smart_config::{
     de::{Delimited, Optional},
 };
 use std::{path::PathBuf, time::Duration};
-use zksync_os_contract_interface::models::BatchDaInputMode;
 use zksync_os_l1_sender::commands::commit::CommitCommand;
 use zksync_os_l1_sender::commands::execute::ExecuteCommand;
 use zksync_os_l1_sender::commands::prove::ProofCommand;
@@ -17,6 +16,7 @@ use zksync_os_mempool::SubPoolLimit;
 use zksync_os_object_store::ObjectStoreConfig;
 use zksync_os_observability::LogFormat;
 use zksync_os_observability::opentelemetry::OpenTelemetryLevel;
+use zksync_os_types::PubdataMode;
 
 /// Configuration for the sequencer node.
 /// Includes configurations of all subsystems.
@@ -244,12 +244,6 @@ pub struct RpcConfig {
     pub stale_filter_ttl: Duration,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum RollupPubdataMode {
-    Blobs,
-    Calldata,
-}
-
 /// Only used on the Main Node.
 #[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
 #[config(derive(Default))]
@@ -280,6 +274,10 @@ pub struct L1SenderConfig {
     #[config(default_t = 2)]
     pub max_priority_fee_per_gas_gwei: u64,
 
+    /// Max priority fee per gas we are willing to spend (in gwei).
+    #[config(default_t = 1)]
+    pub max_fee_per_blob_gas_wei: u64,
+
     /// Max number of commands (to commit/prove/execute one batch) to be processed at a time.
     #[config(default_t = 16)]
     pub command_limit: usize,
@@ -295,10 +293,10 @@ pub struct L1SenderConfig {
     #[config(default_t = true)]
     pub enabled: bool,
 
-    /// Rollup pubdata mode - either blobs or calldata.
-    #[config(default_t = RollupPubdataMode::Calldata)]
+    /// Pubdata mode
+    #[config(default_t = PubdataMode::Calldata)]
     #[config(with = Serde![str])]
-    pub rollup_pubdata_mode: RollupPubdataMode,
+    pub pubdata_mode: PubdataMode,
 }
 
 #[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
@@ -581,6 +579,7 @@ impl L1SenderConfig {
             operator_pk,
             max_fee_per_gas_gwei: self.max_fee_per_gas_gwei,
             max_priority_fee_per_gas_gwei: self.max_priority_fee_per_gas_gwei,
+            max_fee_per_blob_gas_wei: self.max_fee_per_blob_gas_wei,
             command_limit: self.command_limit,
             poll_interval: self.poll_interval,
             phantom_data: Default::default(),
@@ -644,19 +643,9 @@ impl From<RebuildBlocksConfig> for RebuildOptions {
 
 pub fn gas_adjuster_config(
     c: GasAdjusterConfig,
-    da_input_mode: BatchDaInputMode,
-    rollup_pubdata_mode: RollupPubdataMode,
+    pubdata_mode: PubdataMode,
     max_priority_fee_per_gas_gwei: u64,
 ) -> zksync_os_gas_adjuster::GasAdjusterConfig {
-    let pubdata_mode = match (da_input_mode, rollup_pubdata_mode) {
-        (BatchDaInputMode::Validium, _) => zksync_os_gas_adjuster::PubdataMode::Validium,
-        (BatchDaInputMode::Rollup, RollupPubdataMode::Blobs) => {
-            zksync_os_gas_adjuster::PubdataMode::Blobs
-        }
-        (BatchDaInputMode::Rollup, RollupPubdataMode::Calldata) => {
-            zksync_os_gas_adjuster::PubdataMode::Calldata
-        }
-    };
     let max_priority_fee_per_gas = max_priority_fee_per_gas_gwei as u128 * (GWEI_TO_WEI as u128);
     zksync_os_gas_adjuster::GasAdjusterConfig {
         pubdata_mode,

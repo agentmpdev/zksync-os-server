@@ -1,3 +1,4 @@
+use alloy::consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
 use alloy::primitives::{Address, B256, U256, keccak256};
 use blake2::{Blake2s256, Digest};
 use ruint::aliases::B160;
@@ -7,7 +8,7 @@ use zk_ee::utils::Bytes32;
 use zksync_os_contract_interface::models::{CommitBatchInfo, StoredBatchInfo};
 use zksync_os_interface::types::{BlockContext, BlockOutput};
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
-use zksync_os_types::{L2_TO_L1_TREE_SIZE, L2ToL1Log, ZkEnvelope, ZkTransaction};
+use zksync_os_types::{L2_TO_L1_TREE_SIZE, L2ToL1Log, PubdataMode, ZkEnvelope, ZkTransaction};
 
 const PUBDATA_SOURCE_CALLDATA: u8 = 0;
 
@@ -22,6 +23,8 @@ pub struct BatchInfo {
     /// L1 protocol upgrade transaction that was finalized in this batch. Missing for the vast
     /// majority of batches.
     pub upgrade_tx_hash: Option<B256>,
+    /// Blobs sidecar that should be sent with commit operation.
+    pub blob_sidecar: BlobTransactionSidecar,
 }
 
 impl BatchInfo {
@@ -35,6 +38,7 @@ impl BatchInfo {
         chain_id: u64,
         chain_address: Address,
         batch_number: u64,
+        pubdata_mode: PubdataMode,
     ) -> Self {
         let mut priority_operations_hash = keccak256([]);
         let mut number_of_layer1_txs = 0;
@@ -96,29 +100,7 @@ impl BatchInfo {
         };
 
         /* ---------- operator DA input ---------- */
-        let mut operator_da_input: Vec<u8> = vec![];
-
-        // reference for this header is taken from zk_ee: https://github.com/matter-labs/zk_ee/blob/ad-aggregation-program/aggregator/src/aggregation/da_commitment.rs#L27
-        // consider reusing that code instead:
-        //
-        // hasher.update([0u8; 32]); // we don't have to validate state diffs hash
-        // hasher.update(Keccak256::digest(&pubdata)); // full pubdata keccak
-        // hasher.update([1u8]); // with calldata we should provide 1 blob
-        // hasher.update([0u8; 32]); // its hash will be ignored on the settlement layer
-        // Ok(hasher.finalize().into())
-
-        operator_da_input.extend(B256::ZERO.as_slice());
-        operator_da_input.extend(keccak256(&total_pubdata));
-        operator_da_input.push(1);
-        operator_da_input.extend(B256::ZERO.as_slice());
-
-        //     bytes32 daCommitment; - we compute hash of the first part of the operator_da_input (see above)
-        let operator_da_input_header_hash = keccak256(&operator_da_input);
-
-        operator_da_input.extend([PUBDATA_SOURCE_CALLDATA]);
-        operator_da_input.extend(&total_pubdata);
-        // blob_commitment should be set to zero in ZK OS
-        operator_da_input.extend(B256::ZERO.as_slice());
+        let da_fields = calculate_da_fields(&total_pubdata, pubdata_mode);
 
         /* ---------- new state commitment ---------- */
         let mut hasher = Blake2s256::new();
@@ -145,31 +127,30 @@ impl BatchInfo {
             priority_operations_hash,
             dependency_roots_rolling_hash: B256::ZERO,
             l2_to_l1_logs_root_hash,
-            // TODO: Update once enforced, not sure where to source it from yet
-            l2_da_validator: Default::default(),
-            da_commitment: operator_da_input_header_hash,
+            l2_da_commitment_scheme: pubdata_mode.da_commitment_scheme(),
+            da_commitment: da_fields.da_commitment,
             first_block_timestamp: first_block_output.header.timestamp,
             last_block_timestamp: last_block_output.header.timestamp,
             chain_id,
-            operator_da_input,
+            operator_da_input: da_fields.operator_da_input,
         };
         Self {
             commit_info,
             chain_address,
             upgrade_tx_hash,
+            blob_sidecar: da_fields.blob_sidecar,
         }
     }
 
-    /// Calculate keccak256 hash of public input
+    /// Calculate keccak256 hash of BatchOutput part of public input
     pub fn public_input_hash(&self) -> B256 {
         let commit_info = &self.commit_info;
         let system_batch_output = zk_os_basic_system::system_implementation::system::BatchOutput {
             chain_id: U256::from(commit_info.chain_id),
             first_block_timestamp: commit_info.first_block_timestamp,
             last_block_timestamp: commit_info.last_block_timestamp,
-            used_l2_da_validator_address: B160::from_be_bytes(
-                commit_info.l2_da_validator.into_array(),
-            ),
+            // TODO: commitment_scheme
+            used_l2_da_validator_address: B160::ZERO,
             pubdata_commitment: Bytes32::from(commit_info.da_commitment.0),
             number_of_layer_1_txs: U256::from(commit_info.number_of_layer1_txs),
             priority_operations_hash: Bytes32::from(commit_info.priority_operations_hash.0),
@@ -210,5 +191,69 @@ impl Deref for BatchInfo {
 impl DerefMut for BatchInfo {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.commit_info
+    }
+}
+
+struct DAFields {
+    pub da_commitment: B256,
+    pub operator_da_input: Vec<u8>,
+    pub blob_sidecar: BlobTransactionSidecar,
+}
+
+fn calculate_da_fields(pubdata: &[u8], pubdata_mode: PubdataMode) -> DAFields {
+    let (da_commitment, operator_da_input, blob_sidecar) = match pubdata_mode {
+        PubdataMode::Validium => (B256::ZERO, vec![0u8; 32], BlobTransactionSidecar::default()),
+        PubdataMode::Calldata => {
+            let mut operator_da_input = Vec::with_capacity(32 * 3 + 1 + pubdata.len() + 1 + 32);
+
+            // reference for this header is taken from zk_ee: https://github.com/matter-labs/zk_ee/blob/ad-aggregation-program/aggregator/src/aggregation/da_commitment.rs#L27
+            // consider reusing that code instead:
+            //
+            // hasher.update([0u8; 32]); // we don't have to validate state diffs hash
+            // hasher.update(Keccak256::digest(&pubdata)); // full pubdata keccak
+            // hasher.update([1u8]); // with calldata we should provide 1 blob
+            // hasher.update([0u8; 32]); // its hash will be ignored on the settlement layer
+            // Ok(hasher.finalize().into())
+
+            operator_da_input.extend(B256::ZERO.as_slice());
+            operator_da_input.extend(keccak256(&pubdata));
+            operator_da_input.push(1);
+            operator_da_input.extend(B256::ZERO.as_slice());
+
+            //     bytes32 daCommitment; - we compute hash of the first part of the operator_da_input (see above)
+            let da_commitment = keccak256(&operator_da_input);
+
+            operator_da_input.extend([PUBDATA_SOURCE_CALLDATA]);
+            operator_da_input.extend(pubdata);
+            // blob_commitment should be set to zero in ZK OS
+            operator_da_input.extend(B256::ZERO.as_slice());
+
+            (
+                da_commitment,
+                operator_da_input,
+                BlobTransactionSidecar::default(),
+            )
+        }
+        PubdataMode::Blobs => {
+            // returns error in case of internal error during sidecar calculation
+            let blob_sidecar = SidecarBuilder::<SimpleCoder>::from_slice(pubdata)
+                .build()
+                .unwrap();
+            let versioned_hashes: Vec<u8> = blob_sidecar
+                .versioned_hashes()
+                .map(|hash| hash.0.to_vec())
+                .flatten()
+                .collect();
+            let da_commitment = keccak256(&versioned_hashes);
+
+            // we place zeroes into da input to publish blobs with commit transaction
+            let operator_da_input = vec![0u8; versioned_hashes.len()];
+            (da_commitment, operator_da_input, blob_sidecar)
+        }
+    };
+    DAFields {
+        da_commitment,
+        operator_da_input,
+        blob_sidecar,
     }
 }

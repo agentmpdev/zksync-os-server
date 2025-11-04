@@ -2,7 +2,6 @@ use crate::prover_api::proof_storage::{ProofStorage, StoredBatch};
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use tokio::sync::mpsc;
-use zksync_os_contract_interface::models::BatchDaInputMode;
 use zksync_os_l1_sender::batcher_metrics::BatchExecutionStage;
 use zksync_os_l1_sender::batcher_model::{BatchEnvelope, FriProof};
 use zksync_os_l1_sender::commands::commit::CommitCommand;
@@ -18,7 +17,6 @@ use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
 pub struct GaplessCommitter {
     pub next_expected: u64,
     pub proof_storage: ProofStorage,
-    pub da_input_mode: BatchDaInputMode,
 }
 
 #[async_trait]
@@ -70,10 +68,7 @@ impl PipelineComponent for GaplessCommitter {
                                 .await?;
                             latency_tracker.enter_state(GenericComponentState::WaitingSend);
                             output
-                                .send(CommitCommand::new(
-                                    stored_batch.batch_envelope(),
-                                    self.da_input_mode,
-                                ))
+                                .send(CommitCommand::new(stored_batch.batch_envelope()))
                                 .await?;
                             latency_tracker.enter_state(GenericComponentState::Processing);
                         }

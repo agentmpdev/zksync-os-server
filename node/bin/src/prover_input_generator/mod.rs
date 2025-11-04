@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use vise::{Buckets, Histogram, LabeledFamily, Metrics, Unit};
+use zk_ee::common_structs::DACommitmentScheme;
 use zksync_os_interface::traits::TxListSource;
 use zksync_os_interface::types::BlockOutput;
 use zksync_os_l1_sender::batcher_model::ProverInput;
@@ -16,7 +17,7 @@ use zksync_os_multivm::{ExecutionVersion, proving_run_execution_version};
 use zksync_os_observability::{ComponentStateReporter, GenericComponentState};
 use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
 use zksync_os_storage_api::{ReadStateHistory, ReplayRecord};
-use zksync_os_types::ZksyncOsEncode;
+use zksync_os_types::{PubdataMode, ZksyncOsEncode};
 
 /// This component generates prover input from batch replay data
 pub struct ProverInputGenerator<ReadState> {
@@ -25,6 +26,7 @@ pub struct ProverInputGenerator<ReadState> {
     pub first_block_to_process: u64,
     pub app_bin_base_path: PathBuf,
     pub read_state: ReadState,
+    pub pubdata_mode: PubdataMode,
 }
 
 #[async_trait]
@@ -51,6 +53,7 @@ impl<ReadState: ReadStateHistory + Clone + Send + 'static> PipelineComponent
 
         let first_block_to_process = self.first_block_to_process;
         let read_state = self.read_state;
+        let da_commitment_scheme = self.pubdata_mode.da_commitment_scheme_zksync_os();
         let enable_logging = self.enable_logging;
         let app_bin_base_path = self.app_bin_base_path;
         let maximum_in_flight_blocks = self.maximum_in_flight_blocks;
@@ -85,6 +88,7 @@ impl<ReadState: ReadStateHistory + Clone + Send + 'static> PipelineComponent
                         &replay_record,
                         read_state_clone,
                         tree.block_start.clone(),
+                        da_commitment_scheme,
                         app_bin_base_path_clone,
                         enable_logging,
                     );
@@ -113,6 +117,7 @@ fn compute_prover_input(
     replay_record: &ReplayRecord,
     state_handle: impl ReadStateHistory,
     tree_view: MerkleTreeVersion<RocksDBWrapper>,
+    da_commitment_scheme: DACommitmentScheme,
     app_bin_base_path: PathBuf,
     enable_logging: bool,
 ) -> Vec<u32> {
@@ -161,6 +166,7 @@ fn compute_prover_input(
                         state_root_view: initial_storage_commitment,
                         last_block_timestamp: replay_record.previous_block_timestamp,
                     },
+                    da_commitment_scheme,
                     tree_view,
                     state_view,
                     list_source,

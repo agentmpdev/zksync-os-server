@@ -50,6 +50,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use zksync_os_contract_interface::l1_discovery::L1State;
+use zksync_os_contract_interface::models::BatchDaInputMode;
 use zksync_os_gas_adjuster::GasAdjuster;
 use zksync_os_genesis::{FileGenesisInputSource, Genesis, GenesisInputSource};
 use zksync_os_interface::types::BlockHashes;
@@ -75,7 +76,7 @@ use zksync_os_storage_api::{
     FinalityStatus, ReadFinality, ReadReplay, ReadRepository, ReadStateHistory, WriteReplay,
     WriteRepository, WriteState,
 };
-use zksync_os_types::{NotAcceptingReason, TransactionAcceptanceState};
+use zksync_os_types::{NotAcceptingReason, PubdataMode, TransactionAcceptanceState};
 
 const BLOCK_REPLAY_WAL_DB_NAME: &str = "block_replay_wal";
 const STATE_TREE_DB_NAME: &str = "tree";
@@ -170,6 +171,14 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     };
     tracing::info!(?l1_state, "L1 state");
     l1_state.report_metrics();
+
+    match (config.l1_sender_config.pubdata_mode, l1_state.da_input_mode) {
+        (PubdataMode::Calldata | PubdataMode::Blobs, BatchDaInputMode::Validium)
+        | (PubdataMode::Validium, BatchDaInputMode::Rollup) => {
+            panic!("Pubdata mode doesn't correspond to pricing mode from the l1");
+        }
+        _ => {}
+    };
 
     let genesis = Genesis::new(
         genesis_input_source.clone(),
@@ -410,8 +419,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     if config.sequencer_config.is_main_node() {
         let gas_adjuster_config = gas_adjuster_config(
             config.gas_adjuster_config.clone(),
-            l1_state.da_input_mode,
-            config.l1_sender_config.rollup_pubdata_mode,
+            config.l1_sender_config.pubdata_mode,
             config.l1_sender_config.max_priority_fee_per_gas_gwei,
         );
         let gas_adjuster = GasAdjuster::new(
@@ -669,6 +677,7 @@ async fn run_main_node_pipeline(
                 .app_bin_unpack_path
                 .clone(),
             read_state: state.clone(),
+            pubdata_mode: config.l1_sender_config.pubdata_mode,
         })
         .pipe(Batcher {
             chain_id,
@@ -678,12 +687,12 @@ async fn run_main_node_pipeline(
             pubdata_limit_bytes: config.sequencer_config.block_pubdata_limit_bytes,
             batcher_config: config.batcher_config.clone(),
             prev_batch_info: last_committed_batch_info,
+            pubdata_mode: config.l1_sender_config.pubdata_mode,
         })
         .pipe(fri_proving_step)
         .pipe(GaplessCommitter {
             next_expected: node_state_on_startup.l1_state.last_committed_batch + 1,
             proof_storage: batch_storage.clone(),
-            da_input_mode: node_state_on_startup.l1_state.da_input_mode,
         })
         .pipe(L1Sender::<_, CommitCommand> {
             provider: l1_provider.clone(),

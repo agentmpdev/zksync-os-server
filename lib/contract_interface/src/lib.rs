@@ -137,6 +137,15 @@ alloy::sol! {
             bytes32 commitment;
         }
 
+        // Taken from `common/Config.sol`
+        enum L2DACommitmentScheme {
+            NONE,
+            EMPTY_NO_DA,
+            PUBDATA_KECCAK256,
+            BLOBS_AND_PUBDATA_KECCAK256,
+            BLOBS_ZKSYNC_OS
+        }
+
         struct CommitBatchInfoZKsyncOS {
             uint64 batchNumber;
             bytes32 newStateCommitment;
@@ -144,7 +153,7 @@ alloy::sol! {
             bytes32 priorityOperationsHash;
             bytes32 dependencyRootsRollingHash;
             bytes32 l2LogsTreeRoot;
-            address l2DaValidator;
+            L2DACommitmentScheme daCommitmentScheme;
             bytes32 daCommitment;
             uint64 firstBlockTimestamp;
             uint64 lastBlockTimestamp;

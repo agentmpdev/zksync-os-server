@@ -7,8 +7,8 @@ use zksync_os_observability::prometheus::PrometheusExporterConfig;
 use zksync_os_server::config::{
     BatcherConfig, Config, GasAdjusterConfig, GeneralConfig, GenesisConfig, L1SenderConfig,
     L1WatcherConfig, MempoolConfig, ObservabilityConfig, ProverApiConfig,
-    ProverInputGeneratorConfig, RollupPubdataMode, RpcConfig, SequencerConfig, StateBackendConfig,
-    StatusServerConfig, TxValidatorConfig,
+    ProverInputGeneratorConfig, RpcConfig, SequencerConfig, StateBackendConfig, StatusServerConfig,
+    TxValidatorConfig,
 };
 use zksync_os_server::run;
 use zksync_os_server::zkstack_config::ZkStackConfig;
@@ -286,13 +286,6 @@ fn build_configs() -> Config {
     {
         // important: don't replace this with `assert_ne` etc - it may expose private keys in logs
         panic!("Operator addresses for commit, prove and execute must be different");
-    }
-
-    if matches!(
-        l1_sender_config.rollup_pubdata_mode,
-        RollupPubdataMode::Blobs
-    ) {
-        panic!("Blobs mode is not supported yet");
     }
 
     Config {

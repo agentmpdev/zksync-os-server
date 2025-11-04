@@ -1,0 +1,29 @@
+use serde::{Deserialize, Serialize};
+
+/// The chain pubdata mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PubdataMode {
+    Blobs,
+    Calldata,
+    Validium,
+}
+
+impl PubdataMode {
+    pub fn da_commitment_scheme(&self) -> zksync_os_contract_interface::models::DACommitmentScheme {
+        match self {
+            Self::Blobs => zksync_os_contract_interface::models::DACommitmentScheme::BlobsZKsyncOS,
+            Self::Calldata => {
+                zksync_os_contract_interface::models::DACommitmentScheme::BlobsAndPubdataKeccak256
+            }
+            Self::Validium => zksync_os_contract_interface::models::DACommitmentScheme::EmptyNoDA,
+        }
+    }
+
+    pub fn da_commitment_scheme_zksync_os(&self) -> zk_ee::common_structs::DACommitmentScheme {
+        match self {
+            Self::Blobs => zk_ee::common_structs::DACommitmentScheme::BlobsZKsyncOS,
+            Self::Calldata => zk_ee::common_structs::DACommitmentScheme::BlobsAndPubdataKeccak256,
+            Self::Validium => zk_ee::common_structs::DACommitmentScheme::EmptyNoDA,
+        }
+    }
+}

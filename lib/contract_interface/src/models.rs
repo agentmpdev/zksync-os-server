@@ -1,5 +1,5 @@
 use crate::IExecutor;
-use alloy::primitives::{Address, B256, Bytes, U256, keccak256};
+use alloy::primitives::{B256, Bytes, U256, keccak256};
 use alloy::sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -75,6 +75,33 @@ impl From<&StoredBatchInfo> for IExecutor::StoredBatchInfo {
     }
 }
 
+// TODO: consider reusing structure from zksync os
+/// User-friendly version of [`crate::L2DACommitmentScheme`] with statically known possible variants.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum DACommitmentScheme {
+    None,
+    EmptyNoDA,
+    PubdataKeccak256,
+    BlobsAndPubdataKeccak256,
+    BlobsZKsyncOS,
+}
+
+impl From<DACommitmentScheme> for IExecutor::L2DACommitmentScheme {
+    fn from(value: DACommitmentScheme) -> Self {
+        match value {
+            DACommitmentScheme::None => IExecutor::L2DACommitmentScheme::NONE,
+            DACommitmentScheme::EmptyNoDA => IExecutor::L2DACommitmentScheme::EMPTY_NO_DA,
+            DACommitmentScheme::PubdataKeccak256 => {
+                IExecutor::L2DACommitmentScheme::PUBDATA_KECCAK256
+            }
+            DACommitmentScheme::BlobsAndPubdataKeccak256 => {
+                IExecutor::L2DACommitmentScheme::BLOBS_AND_PUBDATA_KECCAK256
+            }
+            DACommitmentScheme::BlobsZKsyncOS => IExecutor::L2DACommitmentScheme::BLOBS_ZKSYNC_OS,
+        }
+    }
+}
+
 /// User-friendly version of [`IExecutor::CommitBatchInfoZKsyncOS`].
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CommitBatchInfo {
@@ -84,7 +111,7 @@ pub struct CommitBatchInfo {
     pub priority_operations_hash: B256,
     pub dependency_roots_rolling_hash: B256,
     pub l2_to_l1_logs_root_hash: B256,
-    pub l2_da_validator: Address,
+    pub l2_da_commitment_scheme: DACommitmentScheme,
     pub da_commitment: B256,
     pub first_block_timestamp: u64,
     pub last_block_timestamp: u64,
@@ -101,8 +128,8 @@ impl From<CommitBatchInfo> for IExecutor::CommitBatchInfoZKsyncOS {
             value.priority_operations_hash,
             value.dependency_roots_rolling_hash,
             value.l2_to_l1_logs_root_hash,
-            Address::from(value.l2_da_validator.0),
-            value.da_commitment,
+            value.l2_da_commitment_scheme.into(),
+            value.da_commitment.into(),
             value.first_block_timestamp,
             value.last_block_timestamp,
             U256::from(value.chain_id),
@@ -123,7 +150,7 @@ impl fmt::Debug for CommitBatchInfo {
                 &self.dependency_roots_rolling_hash,
             )
             .field("l2_to_l1_logs_root_hash", &self.l2_to_l1_logs_root_hash)
-            .field("l2_da_validator", &self.l2_da_validator)
+            .field("l2_da_commitment_scheme", &self.l2_da_commitment_scheme)
             .field("da_commitment", &self.da_commitment)
             .field("first_block_timestamp", &self.first_block_timestamp)
             .field("last_block_timestamp", &self.last_block_timestamp)

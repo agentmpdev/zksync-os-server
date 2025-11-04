@@ -10,7 +10,7 @@ use crate::batcher_model::{BatchEnvelope, FriProof};
 use crate::commands::L1SenderCommand;
 use crate::config::L1SenderConfig;
 use crate::metrics::{L1_SENDER_METRICS, L1SenderState};
-use alloy::network::{EthereumWallet, TransactionBuilder};
+use alloy::network::{EthereumWallet, TransactionBuilder, TransactionBuilder4844};
 use alloy::primitives::Address;
 use alloy::primitives::utils::format_ether;
 use alloy::providers::ext::DebugApi;
@@ -105,10 +105,12 @@ pub async fn run_l1_sender<Input: L1SenderCommand>(
                         operator_address,
                         config.max_fee_per_gas(),
                         config.max_priority_fee_per_gas(),
+                        config.max_fee_per_blob_gas_wei as u128,
                     )
                     .await?
                     .with_to(to_address)
-                    .with_call(&cmd.solidity_call());
+                    .with_call(&cmd.solidity_call())
+                    .with_blob_sidecar(cmd.blob_sidecar());
                     // We don't wait for receipt here, instead we register an alloy watcher that
                     // polls for the receipt in the background. This future resolves when the watcher
                     // finds it.
@@ -170,6 +172,7 @@ async fn tx_request_with_gas_fields(
     operator_address: Address,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
+    max_fee_per_blob_gas: u128,
 ) -> anyhow::Result<TransactionRequest> {
     let eip1559_est = provider.estimate_eip1559_fees().await?;
     tracing::debug!(
@@ -191,10 +194,21 @@ async fn tx_request_with_gas_fields(
         );
     }
 
+    let fee_per_blob_gas = provider.get_blob_base_fee().await?;
+
+    if fee_per_blob_gas > max_fee_per_blob_gas {
+        tracing::warn!(
+            max_fee_per_blob_gas = max_fee_per_blob_gas,
+            fee_per_blob_gas = fee_per_blob_gas,
+            "L1 sender's configured maxPriorityFeePerGas is lower than the one estimated from network"
+        );
+    }
+
     let tx = TransactionRequest::default()
         .with_from(operator_address)
         .with_max_fee_per_gas(max_fee_per_gas)
         .with_max_priority_fee_per_gas(max_priority_fee_per_gas)
+        .with_max_fee_per_blob_gas(max_fee_per_blob_gas)
         // Default value for `max_aggregated_tx_gas` from zksync-era, should always be enough
         .with_gas_limit(15000000);
     Ok(tx)
