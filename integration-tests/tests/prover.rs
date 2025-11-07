@@ -25,7 +25,7 @@ async fn prover() -> anyhow::Result<()> {
 async fn run_txs(tester: &Tester) -> anyhow::Result<()> {
     for nonce in 0..60000 {
         let tx = TransactionRequest::default()
-            .with_to(Address::random())
+            .with_to(Address::ZERO)
             .with_value(U256::from(1))
             .nonce(nonce)
             .gas_limit(21_000);
