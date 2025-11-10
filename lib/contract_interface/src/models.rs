@@ -87,7 +87,9 @@ pub struct CommitBatchInfo {
     pub l2_da_validator: Address,
     pub da_commitment: B256,
     pub first_block_timestamp: u64,
+    pub first_block_number: u64,
     pub last_block_timestamp: u64,
+    pub last_block_number: u64,
     pub chain_id: u64,
     pub operator_da_input: Vec<u8>,
 }
@@ -104,7 +106,9 @@ impl From<CommitBatchInfo> for IExecutor::CommitBatchInfoZKsyncOS {
             Address::from(value.l2_da_validator.0),
             value.da_commitment,
             value.first_block_timestamp,
+            U256::from(value.first_block_number),
             value.last_block_timestamp,
+            U256::from(value.last_block_number),
             U256::from(value.chain_id),
             Bytes::from(value.operator_da_input),
         ))
