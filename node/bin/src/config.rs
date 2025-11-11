@@ -105,7 +105,7 @@ pub struct GenesisConfig {
     /// L1 address of `Bridgehub` contract. This address and chain ID is an entrypoint into L1 discoverability so most
     /// other contracts should be discoverable through it.
     // TODO: Pre-configured value, to be removed. Optional(Serde![int]) is a temp hack, replace it with Serde![str] after removing the default.
-    #[config(with = Optional(Serde![int]), default_t = Some("0xe8a16ed17d1319aa68e5b984e4f685d0e499890e".parse().unwrap()))]
+    #[config(with = Optional(Serde![int]), default_t = Some("0x70b8fd3d45704bf161d2220e4d0963a590b70871".parse().unwrap()))]
     pub bridgehub_address: Option<Address>,
 
     /// Chain ID of the chain node operates on.
@@ -260,19 +260,19 @@ pub struct L1SenderConfig {
     /// Private key to commit batches to L1
     /// Must be consistent with the operator key set on the contract (permissioned!)
     // TODO: Pre-configured value, to be removed
-    #[config(alias = "operator_private_key", default_t = "0x6d73351f52637c83df03af05cbdc8e39e0dc0838f783376a107d15571eb67b3e".into())]
+    #[config(alias = "operator_private_key", default_t = "0xa0671cb63666a0d92087c0e01bc7eaca3c0334c3ce5347b9440331d5c8c8d3df".into())]
     pub operator_commit_pk: SecretString,
 
     /// Private key to use to submit proofs to L1
     /// Can be arbitrary funded address - proof submission is permissionless.
     // TODO: Pre-configured value, to be removed
-    #[config(default_t = "0xba21bce3ca32940817256d9ba1f4879ab9aca68b30d9b38e1be4ae9ce382e07d".into())]
+    #[config(default_t = "0x32740e4d8d0381d43bfcae0acd34e1a28d47a60d6321524c2dc24c574ba29697".into())]
     pub operator_prove_pk: SecretString,
 
     /// Private key to use to execute batches on L1
     /// Can be arbitrary funded address - execute submission is permissionless.
     // TODO: Pre-configured value, to be removed
-    #[config(default_t = "0x16e1ce0ae494fbd07ce3ccec446277a61e52581873ad0a0f7eff89cbaa3e85a9".into())]
+    #[config(default_t = "0x5e1020fc051ca8b11fbe707a62dbd6883b2fc3c0139e9cf12285cf3c33e16f34".into())]
     pub operator_execute_pk: SecretString,
 
     /// Max fee per gas we are willing to spend (in gwei).
@@ -303,7 +303,7 @@ pub struct L1SenderConfig {
     pub enabled: bool,
 
     /// Pubdata mode
-    #[config(default_t = PubdataMode::Calldata)]
+    #[config(default_t = PubdataMode::Blobs)]
     #[config(with = Serde![str])]
     pub pubdata_mode: PubdataMode,
 }
