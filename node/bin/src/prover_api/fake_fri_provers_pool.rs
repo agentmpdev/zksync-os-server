@@ -1,9 +1,8 @@
+use crate::prover_api::fri_job_manager::FriJobManager;
 use futures::future::try_join_all;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{Instant, sleep};
-
-use crate::prover_api::fri_job_manager::FriJobManager;
 
 const POLL_INTERVAL_MS: u64 = 250;
 const PROVER_LABEL: &str = "fake_prover";
@@ -46,7 +45,7 @@ impl FakeFriProversPool {
             let handle = tokio::spawn(async move {
                 loop {
                     // Only take inbound items whose age >= min_age.
-                    match jm.pick_next_job(min_age) {
+                    match jm.pick_next_job(min_age, "fake_prover".to_string()).await {
                         Some((fri_job, _prover_input)) => {
                             // Emulate proving work.
                             let start = Instant::now();

@@ -10,8 +10,8 @@ use http::StatusCode;
 use zksync_os_l1_sender::batcher_model::FriProof;
 use zksync_os_types::ProvingVersion;
 
+use crate::prover_api::fri_job_manager::SubmitError;
 use crate::prover_api::{
-    fri_job_manager::SubmitError,
     metrics::{PROVER_API_METRICS, PickJobResult, ProverStage},
     prover_server::{
         AppState,
@@ -33,7 +33,11 @@ pub(super) async fn pick_fri_job(
     );
     // for real provers, we return the next job immediately -
     // see `FakeProversPool` for fake provers implementation
-    match state.fri_job_manager.pick_next_job(Duration::from_secs(0)) {
+    match state
+        .fri_job_manager
+        .pick_next_job(Duration::from_secs(0), query.id)
+        .await
+    {
         Some((fri_job, input)) => {
             let bytes: Vec<u8> = input.iter().flat_map(|v| v.to_le_bytes()).collect();
             let prover_input = general_purpose::STANDARD.encode(&bytes);
@@ -214,7 +218,7 @@ pub(super) async fn peek_fri_job(
     Path(batch_number): Path<u64>,
     State(state): State<AppState>,
 ) -> Response {
-    match state.fri_job_manager.peek_batch_data(batch_number) {
+    match state.fri_job_manager.peek_batch_data(batch_number).await {
         Some((vk_hash, prover_input)) => {
             let bytes: Vec<u8> = prover_input.iter().flat_map(|v| v.to_le_bytes()).collect();
             Json(BatchDataPayload {
@@ -300,7 +304,7 @@ pub(super) async fn peek_snark_job(
 }
 
 pub(super) async fn status(State(state): State<AppState>) -> Response {
-    let status = state.fri_job_manager.status();
+    let status = state.fri_job_manager.status().await;
     Json(status).into_response()
 }
 

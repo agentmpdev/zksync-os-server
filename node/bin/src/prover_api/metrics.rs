@@ -9,6 +9,8 @@ pub struct ProverMetrics {
     #[metrics(unit = Unit::Seconds, labels = ["stage", "type", "id"], buckets = Buckets::LATENCIES)]
     pub prove_time_per_tx:
         LabeledFamily<(ProverStage, ProverType, &'static str), Histogram<Duration>, 3>,
+    #[metrics(labels = ["stage", "type"], buckets = Buckets::values(&[1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 50.0]))]
+    pub proved_after_attempts: LabeledFamily<(ProverStage, ProverType), Histogram, 2>,
 }
 
 #[derive(Debug, Metrics)]

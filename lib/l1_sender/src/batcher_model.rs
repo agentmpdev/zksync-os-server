@@ -10,7 +10,7 @@ use time::UtcDateTime;
 use zksync_os_batch_types::BatchSignatureSet;
 use zksync_os_contract_interface::models::StoredBatchInfo;
 use zksync_os_observability::LatencyDistributionTracker;
-use zksync_os_types::{ProtocolSemanticVersion, ProvingVersion};
+use zksync_os_types::{ProtocolSemanticVersion, ProvingVersion, ProvingVersionError};
 // todo: these models are used throughout the batcher subsystem - not only l1 sender
 //       we will move them to `types` or `batcher_types` when an analogous crate is created in `zksync-os`
 
@@ -45,6 +45,10 @@ impl BatchMetadata {
         Ok(ProvingVersion::try_from(self.protocol_version.clone())
             .context("Failed to get proving version from protocol version")?
             .vk_hash())
+    }
+
+    pub fn proving_version(&self) -> Result<ProvingVersion, ProvingVersionError> {
+        ProvingVersion::try_from(self.protocol_version.clone())
     }
 }
 
