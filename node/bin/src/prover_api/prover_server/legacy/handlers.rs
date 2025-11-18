@@ -93,7 +93,11 @@ pub(super) async fn submit_fri_proof(
 
 pub(super) async fn pick_snark_job(State(state): State<AppState>) -> Response {
     let start = Instant::now();
-    match state.snark_job_manager.pick_real_job().await {
+    match state
+        .snark_job_manager
+        .pick_real_job("unknown_prover".to_string())
+        .await
+    {
         Ok(Some(batches)) => {
             // Expect non-empty and all real FRI proofs
             let from = batches.first().unwrap().0.batch_number;
@@ -140,7 +144,7 @@ pub(super) async fn pick_snark_job(State(state): State<AppState>) -> Response {
 }
 
 pub(super) async fn submit_snark_proof(
-    Query(_query): Query<ProverQuery>,
+    Query(query): Query<ProverQuery>,
     State(state): State<AppState>,
     Json(payload): Json<SnarkProofPayload>,
 ) -> Result<Response, (StatusCode, String)> {
@@ -156,6 +160,7 @@ pub(super) async fn submit_snark_proof(
             payload.block_number_to,
             None,
             proof_bytes,
+            query.id.unwrap_or("unknown_prover".to_string()),
         )
         .await
     {

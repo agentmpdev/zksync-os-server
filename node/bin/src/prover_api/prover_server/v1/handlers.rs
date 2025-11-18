@@ -127,7 +127,7 @@ pub(super) async fn pick_snark_job(
         "Received SNARK job pick request from prover with ID: {}",
         query.id
     );
-    match state.snark_job_manager.pick_real_job().await {
+    match state.snark_job_manager.pick_real_job(query.id).await {
         Ok(Some(batches)) => {
             // Expect non-empty and all real FRI proofs
             let from = batches.first().unwrap().0.batch_number;
@@ -201,6 +201,7 @@ pub(super) async fn submit_snark_proof(
             payload.to_batch_number,
             Some(proving_version),
             proof_bytes,
+            query.id,
         )
         .await
     {

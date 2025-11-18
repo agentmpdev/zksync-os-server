@@ -30,11 +30,9 @@ impl FriProvingPipelineStep {
         assignment_timeout: Duration,
         max_assigned_batch_range: usize,
     ) -> (Self, Arc<FriJobManager>) {
-        // Create channel for completed proofs
-        // Capacity: 1 - we don't want to add additional buffers here -
-        // they are defined uniformly in `OUTPUT_BUFFER_SIZE` const of pipeline steps.
+        // Create channel for completed proofs - between FriProveManager and GaplessCommitter
         let (batches_with_proof_sender, batches_with_proof_receiver) =
-            mpsc::channel::<SignedBatchEnvelope<FriProof>>(1);
+            mpsc::channel::<SignedBatchEnvelope<FriProof>>(5);
 
         let fri_job_manager = Arc::new(FriJobManager::new(
             batches_with_proof_sender,
@@ -70,6 +68,10 @@ impl PipelineComponent for FriProvingPipelineStep {
         tokio::select! {
             result = async {
                 while let Some(batch) = input.recv().await {
+                    tracing::info!(
+                        "Received batch for FRI proving: {:?}",
+                        batch.batch_number()
+                    );
                     // Add job directly to FriJobManager - this will await if queue is full
                     self.fri_job_manager.add_job(batch).await
                 }
@@ -80,6 +82,10 @@ impl PipelineComponent for FriProvingPipelineStep {
             },
             _ = async {
                 while let Some(proof) = self.batches_with_proof_receiver.recv().await {
+                    tracing::info!(
+                        "Received batch after FRI proving: {:?}",
+                        proof.batch_number()
+                    );
                     let _ = output.send(proof).await;
                 }
             } => anyhow::bail!("FRI proving output stream ended unexpectedly"),

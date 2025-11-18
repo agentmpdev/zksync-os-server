@@ -38,7 +38,7 @@ impl Debug for QueueStatistics {
             QueueStatistics::Empty => write!(f, "Empty queue"),
             QueueStatistics::NonEmpty(stats) => write!(
                 f,
-                "Queue has {} jobs, range: {} - {}, oldest job added {:?} ago as has {} attempts",
+                "Queue has {} jobs, range: {} - {}, oldest job added {:?} ago and has {} attempts",
                 stats.jobs_count,
                 stats.min_batch_number,
                 stats.max_batch_number,

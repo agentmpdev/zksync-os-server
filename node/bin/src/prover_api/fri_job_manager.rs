@@ -2,7 +2,7 @@
 //! Replaced FriJobManager and SnarkJobManager
 
 use crate::prover_api::fri_proof_verifier;
-use crate::prover_api::metrics::ProverType;
+use crate::prover_api::metrics::{ProverStage, ProverType};
 use crate::prover_api::proof_storage::{ProofStorage, StoredFailedProof};
 use crate::prover_api::prover_job_map::ProverJobMap;
 use alloy::primitives::Bytes;
@@ -69,7 +69,7 @@ pub struct JobState {
 #[derive(Debug)]
 pub struct FriJobManager {
     // == state ==
-    jobs: ProverJobMap,
+    jobs: ProverJobMap<ProverInput>,
     // outbound
     batches_with_proof_sender: mpsc::Sender<SignedBatchEnvelope<FriProof>>,
     // == storage ==
@@ -85,7 +85,11 @@ impl FriJobManager {
         assignment_timeout: Duration,
         max_assigned_batch_range: usize,
     ) -> Self {
-        let jobs = ProverJobMap::new(assignment_timeout, max_assigned_batch_range);
+        let jobs = ProverJobMap::<ProverInput>::new(
+            assignment_timeout,
+            max_assigned_batch_range,
+            ProverStage::Fri,
+        );
         let latency_tracker = ComponentStateReporter::global().handle_for(
             "fri_job_manager",
             GenericComponentState::ProcessingOrWaitingRecv,
@@ -99,7 +103,6 @@ impl FriJobManager {
     }
 
     /// Adds a pending job to the queue.
-    /// Validates strict ordering.
     /// Awaits if queue is full (ProverJobMap.max_assigned_batch_range).
     pub async fn add_job(&self, batch_envelope: SignedBatchEnvelope<ProverInput>) {
         self.jobs.add_job(batch_envelope).await
