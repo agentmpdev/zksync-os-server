@@ -141,31 +141,33 @@ impl<T: Clone> ProverJobMap<T> {
         let now = Instant::now();
         let mut jobs = self.lock_with_tracking(JobMapMethod::PickJobsWhile).await;
 
-        // Check if this prover already has jobs assigned and unassign them
-        let mut unassigned_count = 0;
-        for (batch_number, entry) in jobs.iter_mut() {
-            if let Some(ref assigned_to) = entry.metadata.assigned_to_prover_id {
-                if assigned_to == prover_id {
-                    entry.metadata.assigned_to_prover_id = None;
-                    entry.metadata.assigned_at = None;
-                    unassigned_count += 1;
-                    tracing::warn!(
-                        batch_number,
-                        prover_id,
-                        ?self.prover_stage,
-                        "Unassigning previously assigned job from prover before assigning new job"
-                    );
+        if !prover_id.starts_with("fake_") {
+            // Check if this prover already has jobs assigned and unassign them
+            let mut unassigned_count = 0;
+            for (batch_number, entry) in jobs.iter_mut() {
+                if let Some(ref assigned_to) = entry.metadata.assigned_to_prover_id {
+                    if assigned_to == prover_id {
+                        entry.metadata.assigned_to_prover_id = None;
+                        entry.metadata.assigned_at = None;
+                        unassigned_count += 1;
+                        tracing::warn!(
+                            batch_number,
+                            prover_id,
+                            ?self.prover_stage,
+                            "Unassigning previously assigned job from prover before assigning new job"
+                        );
+                    }
                 }
             }
-        }
-
-        if unassigned_count > 0 {
-            tracing::warn!(
+            if unassigned_count > 0 {
+                tracing::warn!(
                 prover_id,
                 unassigned_count,
                 ?self.prover_stage,
                 "Prover requested new job while still having jobs assigned - unassigned previous jobs"
             );
+            }
+
         }
 
         let mut selected_jobs = Vec::new();
