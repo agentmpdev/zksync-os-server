@@ -235,6 +235,18 @@ impl SnarkJobManager {
             .enter_state(GenericComponentState::ProcessingOrWaitingRecv);
         Ok(())
     }
+
+    /// Unassigns jobs in the given batch range.
+    /// Returns true if at least one job was unassigned, false if no jobs were found or unassigned.
+    pub async fn unassign_jobs(&self, batch_from: u64, batch_to: u64) -> bool {
+        let mut any_unassigned = false;
+        for batch_number in batch_from..=batch_to {
+            if self.jobs.unassign_job(batch_number).await {
+                any_unassigned = true;
+            }
+        }
+        any_unassigned
+    }
 }
 
 const POLL_INTERVAL_MS: u64 = 1000;

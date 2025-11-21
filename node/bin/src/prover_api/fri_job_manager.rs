@@ -339,6 +339,12 @@ impl FriJobManager {
         self.jobs.status().await
     }
 
+    /// Unassigns a job by batch number.
+    /// Returns true if the job was unassigned, false if not found or not assigned.
+    pub async fn unassign_job(&self, batch_number: u64) -> bool {
+        self.jobs.unassign_job(batch_number).await
+    }
+
     fn try_reserve_permit_downstream(
         &self,
     ) -> Result<Permit<SignedBatchEnvelope<FriProof>>, SubmitError> {

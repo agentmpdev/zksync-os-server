@@ -448,6 +448,28 @@ impl<T: Clone> ProverJobMap<T> {
             .collect() // Already sorted by BTreeMap ordering
     }
 
+    /// Unassigns a job by batch number if it exists and is currently assigned.
+    /// Returns true if the job was unassigned, false if not found or not assigned.
+    pub async fn unassign_job(&self, batch_number: u64) -> bool {
+        let mut jobs = self.lock_with_tracking(JobMapMethod::Status).await;
+
+        if let Some(entry) = jobs.get_mut(&batch_number) {
+            if entry.metadata.assigned_at.is_some() {
+                let prover_id = entry.metadata.assigned_to_prover_id.take();
+                entry.metadata.assigned_at = None;
+
+                tracing::info!(
+                    batch_number,
+                    prover_id = ?prover_id,
+                    ?self.prover_stage,
+                    "Job unassigned manually"
+                );
+                return true;
+            }
+        }
+        false
+    }
+
     const WARN_AT_ACQUIRE_TIME_MS: u64 = 500;
     /// Acquire the lock with tracking of acquisition time and hold time
     async fn lock_with_tracking(&self, method: JobMapMethod) -> TrackedLockGuard<'_, T> {

@@ -309,6 +309,21 @@ pub(super) async fn status(State(state): State<AppState>) -> Response {
     Json(status).into_response()
 }
 
+pub(super) async fn unassign_fri_job(
+    Path(batch_number): Path<u64>,
+    State(state): State<AppState>,
+) -> Response {
+    if state.fri_job_manager.unassign_job(batch_number).await {
+        (StatusCode::OK, format!("Job {batch_number} unassigned")).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Job {batch_number} not found or not assigned"),
+        )
+            .into_response()
+    }
+}
+
 /// Get detailed information about a failed FRI proof for debugging.
 /// Returns the most recent failed proof for the given batch number.
 pub(super) async fn get_failed_fri_proof(
@@ -341,5 +356,27 @@ pub(super) async fn get_failed_fri_proof(
             )
                 .into_response()
         }
+    }
+}
+
+pub(super) async fn unassign_snark_job(
+    Path((from_batch_number, to_batch_number)): Path<(u64, u64)>,
+    State(state): State<AppState>,
+) -> Response {
+    if from_batch_number > to_batch_number {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid range: from_batch_number ({from_batch_number}) must be <= to_batch_number ({to_batch_number})")
+        ).into_response();
+    }
+
+    if state.snark_job_manager.unassign_jobs(from_batch_number, to_batch_number).await {
+        (StatusCode::OK, format!("Jobs {from_batch_number}-{to_batch_number} unassigned")).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Jobs {from_batch_number}-{to_batch_number} not found or not assigned"),
+        )
+            .into_response()
     }
 }

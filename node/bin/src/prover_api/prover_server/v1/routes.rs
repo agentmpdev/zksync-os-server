@@ -7,7 +7,7 @@ use crate::prover_api::prover_server::{
     AppState,
     v1::handlers::{
         get_failed_fri_proof, peek_fri_job, peek_snark_job, pick_fri_job, pick_snark_job, status,
-        submit_fri_proof, submit_snark_proof,
+        submit_fri_proof, submit_snark_proof, unassign_fri_job, unassign_snark_job,
     },
 };
 
@@ -21,6 +21,8 @@ pub(in crate::prover_api::prover_server) fn v1_routes() -> Router<AppState> {
         // debugging routes
         .route("/FRI/{id}/peek", get(peek_fri_job))
         .route("/FRI/{id}/failed", get(get_failed_fri_proof))
+        .route("/FRI/{id}/unassign", post(unassign_fri_job))
         .route("/SNARK/{from}/{to}/peek", get(peek_snark_job))
+        .route("/SNARK/{from}/{to}/unassign", post(unassign_snark_job))
         .route("/status/", get(status))
 }
