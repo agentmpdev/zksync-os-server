@@ -63,7 +63,7 @@ where
     type Output = L1SenderCommand<ExecuteCommand>;
 
     const NAME: &'static str = "priority_tree";
-    const OUTPUT_BUFFER_SIZE: usize = 5;
+    const OUTPUT_BUFFER_SIZE: usize = 500;
 
     async fn run(
         self,

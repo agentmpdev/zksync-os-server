@@ -28,7 +28,7 @@ impl PipelineComponent for GaplessCommitter {
     type Output = L1SenderCommand<CommitCommand>;
 
     const NAME: &'static str = "gapless_committer";
-    const OUTPUT_BUFFER_SIZE: usize = 5;
+    const OUTPUT_BUFFER_SIZE: usize = 500;
 
     async fn run(
         self,

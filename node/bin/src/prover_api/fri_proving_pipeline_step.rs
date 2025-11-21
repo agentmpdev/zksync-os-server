@@ -56,7 +56,7 @@ impl PipelineComponent for FriProvingPipelineStep {
     type Output = SignedBatchEnvelope<FriProof>;
 
     const NAME: &'static str = "fri_proving";
-    const OUTPUT_BUFFER_SIZE: usize = 5;
+    const OUTPUT_BUFFER_SIZE: usize = 500;
 
     async fn run(
         mut self,

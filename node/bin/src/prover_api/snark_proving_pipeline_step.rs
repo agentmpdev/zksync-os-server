@@ -57,7 +57,7 @@ impl PipelineComponent for SnarkProvingPipelineStep {
     type Output = L1SenderCommand<ProofCommand>;
 
     const NAME: &'static str = "snark_proving";
-    const OUTPUT_BUFFER_SIZE: usize = 5;
+    const OUTPUT_BUFFER_SIZE: usize = 500;
 
     async fn run(
         mut self,
