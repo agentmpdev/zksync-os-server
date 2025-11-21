@@ -36,6 +36,7 @@ struct Args {
     #[arg(long)] estimate_gas: bool,
     #[arg(long, value_enum, default_value_t = DestMode::Wallet)] dest: DestMode,
     #[arg(long)] erc20_address: Option<String>,
+    #[arg(long)] override_gas_price: Option<String>,
     #[arg(long, default_value = "TestToken")] erc20_name: String,
     #[arg(long, default_value = "TTK")]       erc20_symbol: String,
 }
@@ -60,13 +61,13 @@ async fn main() -> anyhow::Result<()> {
     //-------------------------------- wallets + ETH prefund ---------------//
     let wallets = wallets::derive(&args.mnemonic, args.wallets, chain_id)?;
     let addrs: Vec<_> = wallets.iter().map(|w| w.address()).collect();
-
+    let override_gas_price = args.override_gas_price.as_ref().map(|x| x.parse::<U256>().unwrap());
     let base_eth: U256 = args.amount_fund.parse()?;
     let mut rng = StdRng::from_entropy();
     let eth_amounts: Vec<U256> = (0..addrs.len())
         .map(|_| U256::from(((base_eth.as_u128() as f64) * rng.gen_range(1.5..3.5)) as u128))
         .collect();
-    wallets::prefund_varied(&*rich_std_arc, &addrs, &eth_amounts).await?;
+    wallets::prefund_varied(&*rich_std_arc, &addrs, &eth_amounts, override_gas_price).await?;
 
     //-------------------------------- transfer size ------------------------//
     let mut list: Vec<u128> = eth_amounts.iter().map(|x| x.as_u128()).collect();
@@ -114,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         provider.clone(), wallets.clone(), gas, metrics.clone(),
         running.clone(), args.max_in_flight, mean_transfer,
         token_nm.address(), rng_arc.clone(), dest_rand,
-        args.rpc_url.clone(),
+        args.rpc_url.clone(), override_gas_price
     );
     println!("▶ ERC-20 test started with {} wallets, gas: {}", args.wallets, gas);
 

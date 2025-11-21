@@ -30,12 +30,13 @@ pub async fn deploy_and_mint<S: Signer + 'static>(
         signer.clone(),
         (1_000_000_000u64, name.to_owned(), symbol.to_owned()),
     )?
+        .gas_price(100_000)
     .confirmations(0usize)
     .send()
     .await?;
     println!("   deployed at {:?}\n", token.address());
 
-    let call_mint = token.mint(signer.address(), supply);
+    let call_mint = token.mint(signer.address(), supply).gas_price(100_000);
     let pending_mint = call_mint.send().await?;
     println!("   mint tx hash 0x{:x}", pending_mint.tx_hash());
     pending_mint.await?;
@@ -59,7 +60,7 @@ pub async fn distribute_varied<M: Middleware + 'static>(
 
     for (i, (&addr, &amt)) in dests.iter().zip(amounts).enumerate() {
         // 1. broadcast
-        let call = token.transfer(addr, amt);
+        let call = token.transfer(addr, amt).gas_price(100_000);
         let pending = call.send().await?;
         let tx_hash = pending.tx_hash();
         println!(

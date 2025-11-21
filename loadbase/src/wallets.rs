@@ -28,17 +28,22 @@ pub async fn prefund_varied<S: Signer + 'static>(
     rich: &SignerMiddleware<Provider<Http>, S>,
     dests: &[Address],
     amounts: &[U256],
+    gas_price_override: Option<U256>,
 ) -> Result<()> {
     assert_eq!(dests.len(), amounts.len(), "length mismatch");
 
-    let provider   = rich.provider();
-    let gas_price  = provider.get_gas_price().await
-        .unwrap_or_else(|_| U256::from(3_000_000_000u64)); // fallback 3 gwei
+    let provider = rich.provider();
+    let gas_price = match gas_price_override {
+        None => provider.get_gas_price().await
+            .unwrap_or_else(|_| U256::from(3_000_000_000u64)),
+        Some(o) => o
+    };
+
     let per_tx_gas = U256::from(50_000) * gas_price;
 
     // ---------- compute how many txs we need & total ETH ----------
     let mut total_needed = U256::zero();
-    let mut tx_count     = 0u64;
+    let mut tx_count = 0u64;
 
     for (&addr, &target) in dests.iter().zip(amounts) {
         let bal = provider.get_balance(addr, None).await?;
@@ -88,7 +93,7 @@ pub async fn prefund_varied<S: Signer + 'static>(
         let need = target - bal_before;
         let tx = TransactionRequest::pay(addr, need)
             .from(rich.signer().address())
-            .gas(U256::from(210_000))
+            .gas(U256::from(2_100_000))
             .gas_price(gas_price)
             .nonce(next_nonce);
 

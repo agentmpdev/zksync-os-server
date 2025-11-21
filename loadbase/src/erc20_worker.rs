@@ -37,6 +37,7 @@ pub fn spawn_erc20_workers(
     rng: Arc<RwLock<StdRng>>,
     dest_random: bool,
     rpc_url: String,
+    override_gas_price: Option<U256>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let addrs: Vec<_> = wallets.iter().map(|w| w.address()).collect();
     let sems = (0..wallets.len())
@@ -76,12 +77,15 @@ pub fn spawn_erc20_workers(
                     //----------------------------------------------//
                     // 0. fetch gas‑price once per batch            //
                     //----------------------------------------------//
-                    let gas_price = match provider_c.get_gas_price().await {
-                        Ok(p)  => p,
-                        Err(e) => {
-                            eprintln!("❗ gas‑price fetch error {e} – using 3 gwei");
-                            U256::from(3_000_000_000u64) // 3 gwei fallback
-                        }
+                    let gas_price = match override_gas_price {
+                        Some(p) => p,
+                        None => match provider_c.get_gas_price().await {
+                            Ok(p)  => p,
+                            Err(e) => {
+                                eprintln!("❗ gas‑price fetch error {e} – using 3 gwei");
+                                U256::from(3_000_000_000u64) // 3 gwei fallback
+                            }
+                        },
                     };
 
                     //----------------------------------------------//
