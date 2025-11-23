@@ -188,10 +188,6 @@ impl WriteRepository for RepositoryManager {
         transactions: Vec<ZkTransaction>,
     ) -> RepositoryResult<()> {
         if !self.db_ready_to_process_blocks.load(Ordering::Relaxed) {
-            if block_output.header.number > 0 {
-                self.db.rollback(block_output.header.number - 1)?;
-            }
-
             self.db_ready_to_process_blocks
                 .store(true, Ordering::Relaxed);
             tracing::info!("Repo DB is ready to process blocks");
