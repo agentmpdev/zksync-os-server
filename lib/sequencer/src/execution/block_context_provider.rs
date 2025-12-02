@@ -422,6 +422,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                 if let Some(pubdata_price_override) = pubdata_price_override {
                     pubdata_price_override
                 } else {
+                    // TODO(698): Import constants from zksync-os when available.
                     // Amount of native resource spent per blob.
                     const NATIVE_PER_BLOB: u64 = 50_000_000;
                     // Effective number of bytes stored in a blob for `SimpleCoder`.
