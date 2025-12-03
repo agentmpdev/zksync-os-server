@@ -470,7 +470,9 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
         };
 
         // Limit pubdata price increase to 1.5x per block.
-        let pubdata_price = if let Some(prev_pubdata_price) = previous_block_pubdata_price && !prev_pubdata_price.is_zero() {
+        let pubdata_price = if let Some(prev_pubdata_price) = previous_block_pubdata_price
+            && !prev_pubdata_price.is_zero()
+        {
             desired_pubdata_price.min(prev_pubdata_price * U256::from(3) / U256::from(2))
         } else {
             desired_pubdata_price
