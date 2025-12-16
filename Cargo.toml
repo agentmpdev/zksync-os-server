@@ -30,7 +30,7 @@ members = [
     "lib/batch_verification",
     "lib/batch_types",
     "lib/socket",
-    "lib/internal_config"
+    "lib/internal_config",
 ]
 resolver = "3"
 default-members = ["node/bin"]
@@ -81,7 +81,7 @@ zk_os_forward_system_0_1_0 = { package = "forward_system", git = "https://github
     "no_print",
     # We had an issue in this version - it's compilable only with the testing feature.
     # It was used with this feature, so it should stay here forever.
-    "testing"
+    "testing",
 ], default-features = false }
 
 # Dependency on `zk_ee_0_1_0` and `zk_os_basic_system_0_1_0` can be removed after server doesn't have to prove and submit v29 batches.
@@ -110,6 +110,9 @@ zk_os_evm_interpreter = { package = "evm_interpreter", git = "https://github.com
 
 execution_utils = { package = "execution_utils", git = "https://github.com/matter-labs/zksync-airbender.git", tag = "v0.5.2" }
 full_statement_verifier = { package = "full_statement_verifier", git = "https://github.com/matter-labs/zksync-airbender.git", tag = "v0.5.2" }
+
+execution_utils_0_5_1 = { package = "execution_utils", git = "https://github.com/matter-labs/zksync-airbender.git", tag = "v0.5.1" }
+full_statement_verifier_0_5_1 = { package = "full_statement_verifier", git = "https://github.com/matter-labs/zksync-airbender.git", tag = "v0.5.1" }
 
 zksync_os_prover_service = { git = "https://github.com/matter-labs/zksync-airbender-prover.git", tag = "v0.7.0" }
 
