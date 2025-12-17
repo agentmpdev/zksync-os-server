@@ -5,8 +5,10 @@ use crate::transaction::{L1TxType, SystemTxType};
 use crate::{ZkEnvelope, ZkTransaction};
 use alloy::consensus::Transaction;
 use alloy::eips::Encodable2718;
+use alloy::primitives::ruint::aliases::B160;
 use alloy::primitives::{Address, B256, U256};
 use alloy::sol_types::SolValue;
+use alloy_rlp::Encodable;
 use zksync_os_interface::traits::EncodedTx;
 
 /// A transaction that can be encoded in ZKsync OS generic transaction format.
@@ -24,9 +26,18 @@ impl<T: L1TxType> ZksyncOsEncode for L1Envelope<T> {
     }
 }
 
+// todo: to be reused from basic bootloader code
+pub const BOOTLOADER_FORMAL_ADDRESS: B160 = B160::from_limbs([0x8001, 0, 0]);
+
 impl<T: SystemTxType> ZksyncOsEncode for SystemTransactionEnvelope<T> {
     fn encode(self) -> EncodedTx {
-        EncodedTx::Abi(TransactionData::from(self).abi_encode())
+        let mut rlp_body = Vec::new();
+        Encodable::encode(&self.inner, &mut rlp_body);
+        let mut out = Vec::with_capacity(1 + rlp_body.len());
+        out.push(T::TX_TYPE);
+        out.extend_from_slice(&rlp_body);
+        let from = Address::from_slice(&BOOTLOADER_FORMAL_ADDRESS.to_be_bytes::<20>());
+        EncodedTx::Rlp(out, from)
     }
 }
 
@@ -192,7 +203,7 @@ impl<T: SystemTxType> From<SystemTransactionEnvelope<T>> for TransactionData {
         let system_tx = system_tx.inner;
         TransactionData {
             tx_type: U256::from(T::TX_TYPE),
-            from: system_tx.initiator,
+            from: Address::from_slice(&BOOTLOADER_FORMAL_ADDRESS.to_be_bytes::<20>()),
             to: system_tx.destination,
             gas_limit: U256::from(system_tx.gas_limit),
             pubdata_price_limit: U256::from(0),
