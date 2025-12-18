@@ -3,23 +3,22 @@ use crate::{L1WatcherConfig, ProcessL1Event, util};
 use alloy::primitives::Address;
 use alloy::providers::{DynProvider, Provider};
 use alloy::rpc::types::Log;
-use zksync_os_contract_interface::IExecutor::BlockExecution;
+use anyhow::Context;
+use zksync_os_contract_interface::IExecutor::{BlockExecution, ReportCommittedBatchRangeZKsyncOS};
 use zksync_os_contract_interface::ZkChain;
 use zksync_os_storage_api::{ReadBatch, WriteFinality};
 
-pub struct L1ExecuteWatcher<Finality, BatchStorage> {
-    contract_address: Address,
+pub struct L1ExecuteWatcher<Finality> {
+    zk_chain: ZkChain<DynProvider>,
     next_batch_number: u64,
     finality: Finality,
-    batch_storage: BatchStorage,
 }
 
-impl<Finality: WriteFinality, BatchStorage: ReadBatch> L1ExecuteWatcher<Finality, BatchStorage> {
+impl<Finality: WriteFinality> L1ExecuteWatcher<Finality> {
     pub async fn create_watcher(
         config: L1WatcherConfig,
         zk_chain: ZkChain<DynProvider>,
         finality: Finality,
-        batch_storage: BatchStorage,
     ) -> anyhow::Result<L1Watcher> {
         let current_l1_block = zk_chain.provider().get_block_number().await?;
         let last_executed_batch = finality.get_finality_status().last_executed_batch;
@@ -37,10 +36,9 @@ impl<Finality: WriteFinality, BatchStorage: ReadBatch> L1ExecuteWatcher<Finality
         tracing::info!(last_l1_block, "resolved on L1");
 
         let this = Self {
-            contract_address: *zk_chain.address(),
+            zk_chain: zk_chain.clone(),
             next_batch_number: last_executed_batch + 1,
             finality,
-            batch_storage,
         };
         let l1_watcher = L1Watcher::new(
             zk_chain.provider().clone(),
@@ -57,16 +55,14 @@ impl<Finality: WriteFinality, BatchStorage: ReadBatch> L1ExecuteWatcher<Finality
 }
 
 #[async_trait::async_trait]
-impl<Finality: WriteFinality, BatchStorage: ReadBatch> ProcessL1Event
-    for L1ExecuteWatcher<Finality, BatchStorage>
-{
+impl<Finality: WriteFinality> ProcessL1Event for L1ExecuteWatcher<Finality> {
     const NAME: &'static str = "block_execution";
 
     type SolEvent = BlockExecution;
     type WatchedEvent = BlockExecution;
 
     fn contract_address(&self) -> Address {
-        self.contract_address
+        *self.zk_chain.address()
     }
 
     async fn process_event(
@@ -85,12 +81,20 @@ impl<Finality: WriteFinality, BatchStorage: ReadBatch> ProcessL1Event
                 "skipping already processed executed batch",
             );
         } else {
-            let (_, last_executed_block) = self
-                .batch_storage
-                .get_batch_range_by_number(batch_number)
-                .await
-                .map_err(L1WatcherError::Batch)?
-                .expect("executed batch is missing");
+            let l1_block_with_commit = util::find_l1_commit_block_by_batch_number(
+                self.zk_chain.clone(),
+                batch_number,
+                1000,
+            )
+            .await
+            .unwrap();
+            let batch =
+                util::fetch_stored_batch_data(&self.zk_chain, l1_block_with_commit, batch_number)
+                    .await
+                    .unwrap()
+                    .context("could not find where batch was committed on L1")
+                    .unwrap();
+            let last_executed_block = batch.last_block_number;
             self.finality.update_finality_status(|finality| {
                 assert!(
                     batch_number > finality.last_executed_batch,

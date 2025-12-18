@@ -5,7 +5,6 @@ use alloy::eips::BlockId;
 use alloy::primitives::{Address, B256, BlockNumber, TxHash};
 use alloy::providers::{DynProvider, Provider};
 use alloy::rpc::types::{Filter, Log};
-use alloy::sol_types::SolEvent;
 use anyhow::Context;
 use tokio::sync::mpsc;
 use zksync_os_batch_types::BatchInfo;
@@ -76,9 +75,9 @@ impl BatchRangeWatcher {
             last_committed_batch_on_startup: last_committed_batch,
             batch_ranges_sender,
         };
-        let last_executed_batch_data = this
-            .fetch_stored_batch_data(last_l1_block, last_executed_batch)
-            .await?;
+        let last_executed_batch_data =
+            util::fetch_stored_batch_data(&this.zk_chain, last_l1_block, last_executed_batch)
+                .await?;
 
         let l1_watcher = L1Watcher::new(
             provider,
@@ -94,82 +93,6 @@ impl BatchRangeWatcher {
             l1_watcher,
             last_executed_batch_data,
         })
-    }
-
-    /// Fetches and decodes batch commit transaction. Fails if transaction does not exist or is not
-    /// a valid commit transaction.
-    async fn fetch_commit_calldata(
-        &self,
-        tx_hash: TxHash,
-    ) -> Result<CommittedBatch, L1WatcherError> {
-        // todo: retry-backoff logic in case tx is missing
-        let tx = self
-            .zk_chain
-            .provider()
-            .get_transaction_by_hash(tx_hash)
-            .await?
-            .expect("tx not found");
-        let CommitCalldata {
-            commit_batch_info, ..
-        } = CommitCalldata::decode(tx.input()).map_err(L1WatcherError::Other)?;
-
-        // L1 block where this batch got committed.
-        let l1_block_id = BlockId::number(
-            tx.block_number
-                .expect("mined transaction has no block number"),
-        );
-        CommittedBatch::fetch(&self.zk_chain, commit_batch_info, l1_block_id).await
-    }
-
-    /// Fetches and decodes stored batch data for batch `batch_number` that is expected to have been
-    /// committed in `l1_block_number`. Returns `None` if requested batch has not been committed in
-    /// the given L1 block.
-    async fn fetch_stored_batch_data(
-        &self,
-        l1_block_number: BlockNumber,
-        batch_number: u64,
-    ) -> anyhow::Result<Option<StoredBatchData>> {
-        let logs = self
-            .zk_chain
-            .provider()
-            .get_logs(
-                &Filter::new()
-                    .address(*self.zk_chain.address())
-                    .event_signature(ReportCommittedBatchRangeZKsyncOS::SIGNATURE_HASH)
-                    .from_block(l1_block_number)
-                    .to_block(l1_block_number),
-            )
-            .await?;
-        let Some((log, tx_hash)) = logs.into_iter().find_map(|log| {
-            let batch_log = ReportCommittedBatchRangeZKsyncOS::decode_log(&log.inner)
-                .expect("unable to decode `ReportCommittedBatchRangeZKsyncOS` log");
-            if batch_log.batchNumber == batch_number {
-                Some((
-                    batch_log,
-                    log.transaction_hash.expect("indexed log without tx hash"),
-                ))
-            } else {
-                None
-            }
-        }) else {
-            return Ok(None);
-        };
-        let committed_batch = self.fetch_commit_calldata(tx_hash).await?;
-
-        // todo: stop using this struct once fully migrated from S3
-        let last_executed_batch_info = BatchInfo {
-            commit_info: committed_batch.commit_info,
-            chain_address: Default::default(),
-            upgrade_tx_hash: committed_batch.upgrade_tx_hash,
-            blob_sidecar: None,
-        };
-        let batch_info = last_executed_batch_info.into_stored(&committed_batch.protocol_version);
-
-        Ok(Some(StoredBatchData {
-            batch_info,
-            first_block_number: log.firstBlockNumber,
-            last_block_number: log.lastBlockNumber,
-        }))
     }
 }
 
@@ -212,7 +135,7 @@ impl ProcessL1Event for BatchRangeWatcher {
             tracing::trace!(batch_number, "batch is outside of range of interest");
         } else {
             let tx_hash = log.transaction_hash.expect("indexed log without tx hash");
-            let committed_batch = self.fetch_commit_calldata(tx_hash).await?;
+            let committed_batch = util::fetch_commit_calldata(&self.zk_chain, tx_hash).await?;
 
             if self.next_batch_number != committed_batch.commit_info.batch_number {
                 return Err(L1WatcherError::Other(anyhow::anyhow!(
@@ -254,7 +177,7 @@ pub struct CommittedBatch {
 impl CommittedBatch {
     /// Fetches extra information that is not available inside `CommitBatchInfo` from L1 to construct
     /// `CommitedBatch`. Requires `l1_block_id` where the batch was committed.
-    async fn fetch(
+    pub async fn fetch(
         zk_chain: &ZkChain<DynProvider>,
         commit_batch_info: CommitBatchInfo,
         l1_block_id: BlockId,

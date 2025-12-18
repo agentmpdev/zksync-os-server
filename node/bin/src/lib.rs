@@ -68,7 +68,7 @@ use zksync_os_l1_sender::pipeline_component::L1Sender;
 use zksync_os_l1_sender::upgrade_gatekeeper::UpgradeGatekeeper;
 use zksync_os_l1_watcher::{
     BatchRangeWatcher, BatchRangeWatcherInit, CommittedBatch, L1CommitWatcher, L1ExecuteWatcher,
-    L1TxWatcher, L1UpgradeTxWatcher, StoredBatchData,
+    L1TxWatcher, L1UpgradeTxWatcher, StoredBatchData, util,
 };
 use zksync_os_mempool::L2TransactionPool;
 use zksync_os_merkle_tree::{MerkleTree, RocksDBWrapper};
@@ -245,7 +245,9 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     );
 
     let (last_l1_committed_block, last_l1_proved_block, last_l1_executed_block) =
-        commit_proof_execute_block_numbers(&l1_state, &batch_storage).await;
+        commit_proof_execute_block_numbers(&l1_state)
+            .await
+            .expect("could not fetch last committed/proved/executed block number");
 
     let node_startup_state = NodeStateOnStartup {
         is_main_node: config.sequencer_config.is_main_node(),
@@ -328,7 +330,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             config.l1_watcher_config.clone().into(),
             node_startup_state.l1_state.diamond_proxy.clone(),
             finality_storage.clone(),
-            batch_storage.clone(),
         )
         .await
         .expect("failed to start L1 commit watcher")
@@ -341,7 +342,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             config.l1_watcher_config.clone().into(),
             node_startup_state.l1_state.diamond_proxy.clone(),
             finality_storage.clone(),
-            batch_storage.clone(),
         )
         .await
         .expect("failed to start L1 execute watcher")
@@ -888,44 +888,68 @@ fn report_exit<T, E: std::fmt::Debug>(name: &'static str) -> impl Fn(Result<T, E
     }
 }
 
-async fn commit_proof_execute_block_numbers(
-    l1_state: &L1State,
-    batch_storage: &ProofStorage,
-) -> (u64, u64, u64) {
+async fn commit_proof_execute_block_numbers(l1_state: &L1State) -> anyhow::Result<(u64, u64, u64)> {
     let last_committed_block = if l1_state.last_committed_batch == 0 {
         0
     } else {
-        batch_storage
-            .get_batch_with_proof(l1_state.last_committed_batch)
-            .await
-            .expect("Failed to get last committed block from proof storage")
-            .map(|envelope| envelope.batch.last_block_number)
-            .expect("Committed batch is not present in proof storage")
+        let l1_block_with_commit = util::find_l1_commit_block_by_batch_number(
+            l1_state.diamond_proxy.clone(),
+            l1_state.last_committed_batch,
+            // todo: depend on config
+            1000,
+        )
+        .await?;
+        util::fetch_stored_batch_data(
+            &l1_state.diamond_proxy,
+            l1_block_with_commit,
+            l1_state.last_committed_batch,
+        )
+        .await?
+        .context("committed batch was not found")?
+        .last_block_number
     };
 
     // only used to log on node startup
     let last_proved_block = if l1_state.last_proved_batch == 0 {
         0
     } else {
-        batch_storage
-            .get_batch_with_proof(l1_state.last_proved_batch)
-            .await
-            .expect("Failed to get last proved block from proof storage")
-            .map(|envelope| envelope.batch.last_block_number)
-            .expect("Proved batch is not present in proof storage")
+        let l1_block_with_commit = util::find_l1_commit_block_by_batch_number(
+            l1_state.diamond_proxy.clone(),
+            l1_state.last_proved_batch,
+            // todo: depend on config
+            1000,
+        )
+        .await?;
+        util::fetch_stored_batch_data(
+            &l1_state.diamond_proxy,
+            l1_block_with_commit,
+            l1_state.last_proved_batch,
+        )
+        .await?
+        .context("proved batch was not found")?
+        .last_block_number
     };
 
     let last_executed_block = if l1_state.last_executed_batch == 0 {
         0
     } else {
-        batch_storage
-            .get_batch_with_proof(l1_state.last_executed_batch)
-            .await
-            .expect("Failed to get last proved block from execute storage")
-            .map(|envelope| envelope.batch.last_block_number)
-            .expect("Execute batch is not present in proof storage")
+        let l1_block_with_commit = util::find_l1_commit_block_by_batch_number(
+            l1_state.diamond_proxy.clone(),
+            l1_state.last_executed_batch,
+            // todo: depend on config
+            1000,
+        )
+        .await?;
+        util::fetch_stored_batch_data(
+            &l1_state.diamond_proxy,
+            l1_block_with_commit,
+            l1_state.last_executed_batch,
+        )
+        .await?
+        .context("executed batch was not found")?
+        .last_block_number
     };
-    (last_committed_block, last_proved_block, last_executed_block)
+    Ok((last_committed_block, last_proved_block, last_executed_block))
 }
 
 fn run_fake_snark_provers(
