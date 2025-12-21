@@ -173,7 +173,6 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
                                         }
                                     }
                                 }
-
                                 match command.seal_policy {
                                     SealPolicy::Decide(_, limit) if executed_txs.len() >= limit => {
                                     tracing::debug!(block = ctx.block_number,
