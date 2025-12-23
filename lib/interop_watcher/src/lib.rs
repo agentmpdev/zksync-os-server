@@ -126,9 +126,14 @@ impl L1InteropRootsWatcher {
             .fetch_events(from_block, latest_block, start_log_index)
             .await?;
 
-        let interop_roots_envelope = InteropRootsEnvelope::from_interop_roots(interop_roots);
+        // let interop_roots_envelope = InteropRootsEnvelope::from_interop_roots(interop_roots);
+        // self.output.send(interop_roots_envelope).await?;
 
-        self.output.send(interop_roots_envelope).await?;
+        // temporary implementation where we send each interop root separately
+        for interop_root in interop_roots {
+            let interop_root_envelope = InteropRootEnvelope::from_interop_root(interop_root);
+            self.output.send(interop_root_envelope).await?;
+        }
 
         Ok(())
     }

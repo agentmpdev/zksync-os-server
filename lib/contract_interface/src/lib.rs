@@ -45,17 +45,18 @@ alloy::sol! {
     // `IMessageRoot.sol`
     #[sol(rpc)]
     interface IMessageRoot {
+        // not used now
         event NewInteropRoot (
             uint256 indexed chainId,
             uint256 indexed blockNumber,
             uint256 indexed logId,
             bytes32[] sides
         );
+        // not used now
+        function addInteropRootsInBatch(InteropRoot[] calldata interopRootsInput);
 
         // Temporary event
         event AppendedChainRoot(uint256 indexed chainId, uint256 indexed batchNumber, bytes32 indexed chainRoot);
-
-        function addInteropRootsInBatch(InteropRoot[] calldata interopRootsInput);
 
         function addChainBatchRoot(uint256 chainId, uint256 batchNumber, bytes32 messageRoot) external;
     }

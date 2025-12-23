@@ -4,7 +4,9 @@ use crate::transaction::{system::envelope::SystemTransactionEnvelope, tx::System
 use alloy::primitives::{Address, Bytes, address};
 use alloy::sol_types::SolCall;
 use serde::{Deserialize, Serialize};
-use zksync_os_contract_interface::{IMessageRoot::addInteropRootsInBatchCall, InteropRoot};
+use zksync_os_contract_interface::IMessageRoot::addChainBatchRootCall;
+use zksync_os_contract_interface::InteropRoot;
+//use zksync_os_contract_interface::IMessageRoot::addInteropRootsInBatchCall;
 
 pub mod envelope;
 pub mod tx;
@@ -17,9 +19,11 @@ pub const L2_INTEROP_ROOT_STORAGE_ZKSYNC_OS_ADDRESS: Address =
 pub type InteropRootsEnvelope = SystemTransactionEnvelope<InteropRootsTxType>;
 
 impl InteropRootsEnvelope {
-    pub fn from_interop_roots(interop_roots: Vec<InteropRoot>) -> Self {
-        let calldata = addInteropRootsInBatchCall {
-            interopRootsInput: interop_roots,
+    pub fn from_interop_root(interop_root: InteropRoot) -> Self {
+        let calldata = addChainBatchRootCall {
+            chainId: interop_root.chainId,
+            batchNumber: interop_root.blockOrBatchNumber,
+            messageRoot: interop_root.sides[0],
         }
         .abi_encode();
 
@@ -37,11 +41,34 @@ impl InteropRootsEnvelope {
     }
 
     pub fn interop_roots_count(&self) -> u64 {
-        let interop_roots = addInteropRootsInBatchCall::abi_decode(&self.inner.input)
-            .expect("Failed to decode interop roots calldata")
-            .interopRootsInput;
-        interop_roots.len() as u64
+        1
     }
+
+    // pub fn from_interop_roots(interop_roots: Vec<InteropRoot>) -> Self {
+    //     let calldata = addInteropRootsInBatchCall {
+    //         interopRootsInput: interop_roots,
+    //     }
+    //     .abi_encode();
+
+    //     let transaction = SystemTransaction {
+    //         gas_limit: 0,
+    //         to: L2_INTEROP_ROOT_STORAGE_ZKSYNC_OS_ADDRESS,
+    //         input: Bytes::from(calldata),
+    //         marker: PhantomData,
+    //     };
+
+    //     Self {
+    //         hash: transaction.calculate_hash(),
+    //         inner: transaction,
+    //     }
+    // }
+
+    // pub fn interop_roots_count(&self) -> u64 {
+    //     let interop_roots = addInteropRootsInBatchCall::abi_decode(&self.inner.input)
+    //         .expect("Failed to decode interop roots calldata")
+    //         .interopRootsInput;
+    //     interop_roots.len() as u64
+    // }
 }
 
 pub trait SystemTxType: Clone + Send + Sync + std::fmt::Debug + 'static {
