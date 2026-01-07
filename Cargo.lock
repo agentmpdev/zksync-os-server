@@ -13289,6 +13289,7 @@ dependencies = [
  "alloy",
  "anyhow",
  "async-trait",
+ "num",
  "tokio",
  "tracing",
  "vise",
@@ -13304,7 +13305,6 @@ dependencies = [
  "clap",
  "tokio",
  "zksync_os_contract_interface",
- "zksync_os_server",
  "zksync_os_types",
 ]
 
@@ -13342,6 +13342,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "smart-config",
  "tempfile",
  "test-log",
  "tokio",
@@ -13803,6 +13804,7 @@ dependencies = [
  "basic_system 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=dev-20260105)",
  "forward_system 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=dev-20260105)",
  "futures",
+ "num",
  "reth-execution-types",
  "reth-primitives",
  "ruint",
