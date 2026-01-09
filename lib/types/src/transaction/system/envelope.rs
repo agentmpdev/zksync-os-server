@@ -13,7 +13,9 @@ use crate::transaction::system::tx::SystemTransaction;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct SystemTransactionEnvelope<T: SystemTxType> {
+    #[serde(skip)]
     pub hash: B256,
+    #[serde(flatten)]
     pub inner: SystemTransaction<T>,
 }
 
