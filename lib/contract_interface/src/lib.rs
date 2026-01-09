@@ -42,14 +42,18 @@ alloy::sol! {
         bytes32[] sides;
     }
 
-    event NewInteropRoot (
-        uint256 indexed chainId,
-        uint256 indexed blockNumber,
-        uint256 indexed logId,
-        bytes32[] sides
-    );
+    // `IMessageRoot.sol`
+    #[sol(rpc)]
+    interface IMessageRoot {
+        event NewInteropRoot (
+            uint256 indexed chainId,
+            uint256 indexed blockNumber,
+            uint256 indexed logId,
+            bytes32[] sides
+        );
 
-    function addInteropRootsInBatch(InteropRoot[] calldata interopRootsInput);
+        function addInteropRootsInBatch(InteropRoot[] calldata interopRootsInput);
+    }
 
     // `ZKChainStorage.sol`
     enum PubdataPricingMode {
@@ -75,6 +79,7 @@ alloy::sol! {
         function chainTypeManager(uint256 _chainId) external view returns (address);
         function sharedBridge() public view returns (address);
         function getAllZKChainChainIDs() external view returns (uint256[] memory);
+        function messageRoot() external view returns (address);
 
         struct L2TransactionRequestDirect {
             uint256 chainId;
