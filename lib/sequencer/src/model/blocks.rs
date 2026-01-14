@@ -5,7 +5,7 @@ use std::time::Duration;
 use zksync_os_interface::types::BlockContext;
 use zksync_os_mempool::TxStream;
 use zksync_os_storage_api::ReplayRecord;
-use zksync_os_types::{L1TxSerialId, ProtocolSemanticVersion, ZkTransaction};
+use zksync_os_types::{InteropRootsLogIndex, L1TxSerialId, ProtocolSemanticVersion, ZkTransaction};
 
 /// `BlockCommand`s drive the sequencer execution.
 /// Produced by `CommandProducer` - first blocks are `Replay`ed from block replay storage
@@ -103,6 +103,7 @@ pub struct PreparedBlockCommand<'a> {
     /// L1 transaction serial id expected at the beginning of this block.
     /// Not used in execution directly, but required to construct ReplayRecord
     pub starting_l1_priority_id: L1TxSerialId,
+    pub interop_root_log_start_index: InteropRootsLogIndex,
     pub metrics_label: &'static str,
     pub protocol_version: ProtocolSemanticVersion,
     /// Expected hash of the block output (missing for command generated from `BlockCommand::Produce`)

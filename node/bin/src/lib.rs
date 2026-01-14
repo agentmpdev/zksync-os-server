@@ -89,7 +89,9 @@ use zksync_os_storage_api::{
     FinalityStatus, ReadFinality, ReadReplay, ReadRepository, ReadStateHistory, WriteReplay,
     WriteRepository, WriteState,
 };
-use zksync_os_types::{PubdataMode, TransactionAcceptanceState, UpgradeTransaction};
+use zksync_os_types::{
+    InteropRootsLogIndex, PubdataMode, TransactionAcceptanceState, UpgradeTransaction,
+};
 
 const BLOCK_REPLAY_WAL_DB_NAME: &str = "block_replay_wal";
 const STATE_TREE_DB_NAME: &str = "tree";
@@ -416,6 +418,27 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         .map(report_exit("L1 transaction watcher")),
     );
 
+    let next_interop_root_log_index = first_replay_record
+        .as_ref()
+        .map_or(InteropRootsLogIndex::default(), |record| {
+            record.interop_root_log_start_index.clone()
+        });
+
+    // ========== Start InteropRootsWatcher ===========
+    tasks.spawn(
+        // todo: pass the real values here
+        L1InteropRootsWatcher::new(
+            node_startup_state.l1_state.bridgehub.clone(),
+            Duration::from_secs(5),
+            next_interop_root_log_index.clone(),
+            interop_transactions_sender,
+        )
+        .await
+        .expect("failed to start interop roots watcher")
+        .run()
+        .map(report_exit("Interop roots watcher")),
+    );
+
     // ======== Start Status Server ========
     if config.status_server_config.enabled {
         tasks.spawn(
@@ -519,6 +542,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     // should be moved to `sequencer`
     let block_context_provider = BlockContextProvider::new(
         next_l1_priority_id,
+        next_interop_root_log_index,
         l1_transactions_for_sequencer,
         l1_upgrade_transactions_receiver,
         interop_transactions_receiver,
@@ -553,20 +577,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         .expect("failed to start L1 upgrade transaction watcher")
         .run()
         .map(report_exit("L1 upgrade transaction watcher")),
-    );
-
-    // ========== Start InteropRootsWatcher ===========
-    tasks.spawn(
-        // todo: pass the real values here
-        L1InteropRootsWatcher::new(
-            node_startup_state.l1_state.bridgehub.clone(),
-            Duration::from_secs(5),
-            interop_transactions_sender,
-        )
-        .await
-        .expect("failed to start interop roots watcher")
-        .run()
-        .map(report_exit("Interop roots watcher")),
     );
 
     // ========== Start Sequencer ===========

@@ -19,7 +19,7 @@ use zksync_os_mempool::{
 };
 use zksync_os_storage_api::ReplayRecord;
 use zksync_os_types::{
-    ExecutionVersion, InteropRootsEnvelope, L1PriorityEnvelope, L2Envelope,
+    ExecutionVersion, InteropRootsEnvelope, InteropRootsLogIndex, L1PriorityEnvelope, L2Envelope,
     ProtocolSemanticVersion, PubdataMode, UpgradeTransaction, ZkEnvelope,
 };
 
@@ -35,6 +35,7 @@ use zksync_os_types::{
 ///  this is easily fixable if needed.
 pub struct BlockContextProvider<Mempool> {
     next_l1_priority_id: u64,
+    next_interop_root_log_index: InteropRootsLogIndex,
     l1_transactions: mpsc::Receiver<L1PriorityEnvelope>,
     upgrade_transactions: mpsc::Receiver<UpgradeTransaction>,
     interop_transactions: mpsc::Receiver<InteropRootsEnvelope>,
@@ -62,6 +63,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         next_l1_priority_id: u64,
+        next_interop_root_log_index: InteropRootsLogIndex,
         l1_transactions: mpsc::Receiver<L1PriorityEnvelope>,
         upgrade_transactions: mpsc::Receiver<UpgradeTransaction>,
         interop_transactions: mpsc::Receiver<InteropRootsEnvelope>,
@@ -83,6 +85,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
     ) -> Self {
         Self {
             next_l1_priority_id,
+            next_interop_root_log_index,
             l1_transactions,
             upgrade_transactions,
             interop_transactions,
@@ -215,6 +218,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     invalid_tx_policy: InvalidTxPolicy::RejectAndContinue,
                     metrics_label: "produce",
                     starting_l1_priority_id: self.next_l1_priority_id,
+                    interop_root_log_start_index: self.next_interop_root_log_index.clone(),
                     protocol_version: self.protocol_version.clone(),
                     expected_block_output_hash: None,
                     previous_block_timestamp: self.previous_block_timestamp,
@@ -251,6 +255,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     tx_source: Box::pin(ReplayTxStream::new(record.transactions)),
                     starting_l1_priority_id: record.starting_l1_priority_id,
                     metrics_label: "replay",
+                    interop_root_log_start_index: record.interop_root_log_start_index,
                     protocol_version: record.protocol_version,
                     expected_block_output_hash: Some(record.block_output_hash),
                     previous_block_timestamp: self.previous_block_timestamp,
@@ -336,6 +341,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     invalid_tx_policy: InvalidTxPolicy::RejectAndContinue,
                     metrics_label: "rebuild",
                     starting_l1_priority_id: self.next_l1_priority_id,
+                    interop_root_log_start_index: self.next_interop_root_log_index.clone(),
                     protocol_version,
                     expected_block_output_hash: None,
                     previous_block_timestamp: self.previous_block_timestamp,
@@ -362,6 +368,9 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
         for tx in &replay_record.transactions {
             match tx.envelope() {
                 ZkEnvelope::InteropRoots(interop_tx) => {
+                    self.next_interop_root_log_index = interop_tx.event_log_index();
+                    self.next_interop_root_log_index.increment_log_index();
+
                     if matches!(
                         cmd_type,
                         BlockCommandType::Rebuild | BlockCommandType::Replay

@@ -9,7 +9,7 @@ use zksync_os_metadata::NODE_SEMVER_VERSION;
 use zksync_os_network::protocol::{ProtocolEvent, ProtocolState, ZksProtocolHandler};
 use zksync_os_network::version::{ZksProtocolV0, ZksProtocolV1};
 use zksync_os_storage_api::{ReadReplay, ReplayRecord};
-use zksync_os_types::ProtocolSemanticVersion;
+use zksync_os_types::{InteropRootsLogIndex, ProtocolSemanticVersion};
 
 #[derive(Debug, Clone, Default)]
 struct InMemReplay(HashMap<BlockNumber, ReplayRecord>);
@@ -39,6 +39,7 @@ fn dummy_record(block_number: BlockNumber) -> ReplayRecord {
             ..Default::default()
         },
         42,
+        InteropRootsLogIndex::default(),
         vec![],
         24,
         // Important that this is set to `NODE_SEMVER_VERSION` as v1 does not transport node version

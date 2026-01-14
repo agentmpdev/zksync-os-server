@@ -4,10 +4,11 @@ use super::v3::ReplayWireFormatV3;
 use super::v4::ReplayWireFormatV4;
 use super::v5::ReplayWireFormatV5;
 use crate::ReplayRecord;
+use crate::replay_wire_format::v6::ReplayWireFormatV6;
 use alloy::eips::{Decodable2718, Encodable2718};
 use alloy::primitives::{Address, U256};
 use zksync_os_interface::types::{BlockContext, BlockHashes};
-use zksync_os_types::{ProtocolSemanticVersion, ZkEnvelope};
+use zksync_os_types::{InteropRootsLogIndex, ProtocolSemanticVersion, ZkEnvelope};
 
 impl From<ReplayWireFormatV1> for ReplayRecord {
     fn from(value: ReplayWireFormatV1) -> Self {
@@ -51,6 +52,8 @@ impl From<ReplayWireFormatV1> for ReplayRecord {
                 blob_fee: U256::ZERO,
             },
             starting_l1_priority_id,
+            // todo: doesn't look right
+            interop_root_log_start_index: InteropRootsLogIndex::default(),
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -104,6 +107,8 @@ impl From<ReplayWireFormatV2> for ReplayRecord {
                 blob_fee: U256::ZERO,
             },
             starting_l1_priority_id,
+            // todo: doesn't look right
+            interop_root_log_start_index: InteropRootsLogIndex::default(),
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -155,6 +160,8 @@ impl From<ReplayWireFormatV3> for ReplayRecord {
                 blob_fee: U256::ZERO,
             },
             starting_l1_priority_id,
+            // todo: doesn't look right
+            interop_root_log_start_index: InteropRootsLogIndex::default(),
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -209,6 +216,8 @@ impl From<ReplayWireFormatV5> for ReplayRecord {
                 blob_fee,
             },
             starting_l1_priority_id,
+            // todo: doesn't look right
+            interop_root_log_start_index: InteropRootsLogIndex::default(),
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -261,6 +270,8 @@ impl From<ReplayWireFormatV4> for ReplayRecord {
                 blob_fee,
             },
             starting_l1_priority_id,
+            // todo: doesn't look right
+            interop_root_log_start_index: InteropRootsLogIndex::default(),
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -271,11 +282,12 @@ impl From<ReplayWireFormatV4> for ReplayRecord {
     }
 }
 
-impl From<ReplayRecord> for ReplayWireFormatV5 {
+impl From<ReplayRecord> for ReplayWireFormatV6 {
     fn from(value: ReplayRecord) -> Self {
         let ReplayRecord {
             block_context,
             starting_l1_priority_id,
+            interop_root_log_start_index,
             transactions,
             previous_block_timestamp,
             node_version,
@@ -299,10 +311,10 @@ impl From<ReplayRecord> for ReplayWireFormatV5 {
             blob_fee,
         } = block_context;
         Self {
-            block_context: super::v5::BlockContext {
+            block_context: super::v6::BlockContext {
                 chain_id,
                 block_number,
-                block_hashes: super::v5::BlockHashes(block_hashes.0),
+                block_hashes: super::v6::BlockHashes(block_hashes.0),
                 timestamp,
                 eip1559_basefee,
                 pubdata_price,
@@ -315,6 +327,7 @@ impl From<ReplayRecord> for ReplayWireFormatV5 {
                 blob_fee,
             },
             starting_l1_priority_id,
+            interop_root_log_start_index,
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             previous_block_timestamp,
             node_version,
@@ -325,7 +338,7 @@ impl From<ReplayRecord> for ReplayWireFormatV5 {
     }
 }
 
-impl From<zksync_os_types::ZkTransaction> for super::v5::ZkTransactionWireFormat {
+impl From<zksync_os_types::ZkTransaction> for super::v6::ZkTransactionWireFormat {
     fn from(value: zksync_os_types::ZkTransaction) -> Self {
         Self(value.inner.encoded_2718())
     }
@@ -369,6 +382,15 @@ impl From<super::v4::ZkTransactionWireFormat> for zksync_os_types::ZkTransaction
 
 impl From<super::v5::ZkTransactionWireFormat> for zksync_os_types::ZkTransaction {
     fn from(value: super::v5::ZkTransactionWireFormat) -> Self {
+        ZkEnvelope::decode_2718(&mut &value.0[..])
+            .unwrap()
+            .try_into_recovered()
+            .unwrap()
+    }
+}
+
+impl From<super::v6::ZkTransactionWireFormat> for zksync_os_types::ZkTransaction {
+    fn from(value: super::v6::ZkTransactionWireFormat) -> Self {
         ZkEnvelope::decode_2718(&mut &value.0[..])
             .unwrap()
             .try_into_recovered()

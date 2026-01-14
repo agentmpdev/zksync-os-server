@@ -398,6 +398,7 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
         ReplayRecord::new(
             ctx,
             command.starting_l1_priority_id,
+            command.interop_root_log_start_index,
             executed_txs,
             command.previous_block_timestamp,
             NODE_SEMVER_VERSION.clone(),

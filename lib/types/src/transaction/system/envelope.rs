@@ -8,14 +8,16 @@ use alloy::rpc::types::{AccessList, SignedAuthorization};
 use alloy_rlp::{BufMut, Encodable};
 use serde::{Deserialize, Serialize};
 
-use crate::transaction::SystemTxType;
 use crate::transaction::system::tx::SystemTransaction;
+use crate::transaction::{InteropRootsLogIndex, SystemTxType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct SystemTransactionEnvelope<T: SystemTxType> {
     // hash is calculated separately to be able to pass it as a reference later on
     #[serde(skip)]
     pub hash: B256,
+    #[serde(skip)]
+    pub event_log_index: InteropRootsLogIndex,
     #[serde(flatten)]
     pub inner: SystemTransaction<T>,
 }
@@ -23,6 +25,10 @@ pub struct SystemTransactionEnvelope<T: SystemTxType> {
 impl<T: SystemTxType> SystemTransactionEnvelope<T> {
     pub fn hash(&self) -> &B256 {
         &self.hash
+    }
+
+    pub fn event_log_index(&self) -> InteropRootsLogIndex {
+        self.event_log_index.clone()
     }
 }
 
@@ -49,6 +55,8 @@ impl<T: SystemTxType> RlpEcdsaDecodableTx for SystemTransactionEnvelope<T> {
         let transaction = SystemTransaction::<T>::rlp_decode_fields(buf)?;
         Ok(Self {
             hash: transaction.calculate_hash(),
+            // doesn't look right
+            event_log_index: InteropRootsLogIndex::default(),
             inner: transaction,
         })
     }
@@ -87,6 +95,8 @@ impl<T: SystemTxType> Decodable2718 for SystemTransactionEnvelope<T> {
 
         Ok(Self {
             hash,
+            // doesn't look right
+            event_log_index: InteropRootsLogIndex::default(),
             inner: transaction,
         })
     }

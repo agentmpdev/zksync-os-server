@@ -10,7 +10,7 @@ use zksync_os_metadata::NODE_SEMVER_VERSION;
 use zksync_os_rocksdb::RocksDB;
 use zksync_os_rocksdb::db::{NamedColumnFamily, WriteBatch};
 use zksync_os_storage_api::{ReadReplay, ReplayRecord, WriteReplay};
-use zksync_os_types::ProtocolSemanticVersion;
+use zksync_os_types::{InteropRootsLogIndex, ProtocolSemanticVersion};
 
 /// A write-ahead log storing [`ReplayRecord`]s.
 ///
@@ -38,6 +38,7 @@ pub struct BlockReplayStorage {
 pub enum BlockReplayColumnFamily {
     Context,
     StartingL1SerialId,
+    InteropRootLogStartIndex,
     Txs,
     NodeVersion,
     ProtocolVersion,
@@ -52,6 +53,7 @@ impl NamedColumnFamily for BlockReplayColumnFamily {
     const ALL: &'static [Self] = &[
         BlockReplayColumnFamily::Context,
         BlockReplayColumnFamily::StartingL1SerialId,
+        BlockReplayColumnFamily::InteropRootLogStartIndex,
         BlockReplayColumnFamily::Txs,
         BlockReplayColumnFamily::NodeVersion,
         BlockReplayColumnFamily::ProtocolVersion,
@@ -64,6 +66,7 @@ impl NamedColumnFamily for BlockReplayColumnFamily {
         match self {
             BlockReplayColumnFamily::Context => "context",
             BlockReplayColumnFamily::StartingL1SerialId => "last_processed_l1_tx_id",
+            BlockReplayColumnFamily::InteropRootLogStartIndex => "interop_root_log_start_index",
             BlockReplayColumnFamily::Txs => "txs",
             BlockReplayColumnFamily::NodeVersion => "node_version",
             BlockReplayColumnFamily::ProtocolVersion => "protocol_version",
@@ -94,6 +97,7 @@ impl BlockReplayStorage {
                 ReplayRecord {
                     block_context: *genesis_context,
                     starting_l1_priority_id: 0,
+                    interop_root_log_start_index: InteropRootsLogIndex::default(),
                     transactions: vec![],
                     previous_block_timestamp: 0,
                     node_version: NODE_SEMVER_VERSION.clone(),
@@ -136,6 +140,18 @@ impl BlockReplayStorage {
             BlockReplayColumnFamily::StartingL1SerialId,
             &db_key,
             &starting_l1_tx_id_value,
+        );
+
+        let interop_root_log_start_index_value = bincode::serde::encode_to_vec(
+            &record.interop_root_log_start_index,
+            bincode::config::standard(),
+        )
+        .expect("Failed to serialize record.interop_root_log_start_index");
+
+        batch.put_cf(
+            BlockReplayColumnFamily::InteropRootLogStartIndex,
+            &db_key,
+            &interop_root_log_start_index_value,
         );
         batch.put_cf(BlockReplayColumnFamily::Txs, &db_key, &txs_value);
         batch.put_cf(
@@ -273,6 +289,12 @@ impl ReadReplay for BlockReplayStorage {
             ProtocolSemanticVersion::legacy_genesis_version()
         };
 
+        let interop_root_log_start_index = self
+            .db
+            .get_cf(BlockReplayColumnFamily::InteropRootLogStartIndex, &key)
+            .expect("Failed to read from InteropRootLogStartIndex CF")
+            .expect("InteropRootLogStartIndex must be written atomically with Context");
+
         let force_preimages = if let Some(preimages) = self
             .db
             .get_cf(BlockReplayColumnFamily::ForcePreimages, &key)
@@ -306,6 +328,12 @@ impl ReadReplay for BlockReplayStorage {
                 bincode::config::standard(),
             )
             .expect("Failed to deserialize context")
+            .0,
+            interop_root_log_start_index: bincode::serde::decode_from_slice(
+                &interop_root_log_start_index,
+                bincode::config::standard(),
+            )
+            .expect("Failed to deserialize interop root log start index")
             .0,
             transactions: bincode::decode_from_slice(&transactions, bincode::config::standard())
                 .expect("Failed to deserialize transactions")

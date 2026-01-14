@@ -3,7 +3,8 @@ use alloy::rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use zksync_os_interface::types::BlockContext;
 use zksync_os_types::{
-    L1TxSerialId, ProtocolSemanticVersion, ZkEnvelope, ZkReceiptEnvelope, ZkTransaction,
+    InteropRootsLogIndex, L1TxSerialId, ProtocolSemanticVersion, ZkEnvelope, ZkReceiptEnvelope,
+    ZkTransaction,
 };
 
 #[derive(Debug, Clone, RlpEncodable, RlpDecodable)]
@@ -34,6 +35,9 @@ pub struct ReplayRecord {
     /// If `l1_transactions` is non-empty, equals to the first tx id in this block
     /// otherwise, `last_processed_l1_tx_id` equals to the previous block's value
     pub starting_l1_priority_id: L1TxSerialId,
+    /// Log index from which to start scanning for interop roots
+    /// This is the log index of the first interop root in the block
+    pub interop_root_log_start_index: InteropRootsLogIndex,
     pub transactions: Vec<ZkTransaction>,
     /// The field is used to generate the prover input for the block in ProverInputGenerator.
     /// Will be moved to the BlockContext at some point
@@ -53,6 +57,7 @@ impl ReplayRecord {
     pub fn new(
         block_context: BlockContext,
         starting_l1_priority_id: L1TxSerialId,
+        interop_root_log_start_index: InteropRootsLogIndex,
         transactions: Vec<ZkTransaction>,
         previous_block_timestamp: u64,
         node_version: semver::Version,
@@ -72,9 +77,26 @@ impl ReplayRecord {
                 "First L1 tx priority id must match next_l1_priority_id"
             );
         }
+
+        let first_interop_root_log_index = match transactions.first() {
+            Some(tx) => match tx.envelope() {
+                ZkEnvelope::InteropRoots(tx) => Some(tx.event_log_index()),
+                _ => None,
+            },
+            None => None,
+        };
+
+        if let Some(first_interop_root_log_index) = first_interop_root_log_index {
+            assert!(
+                first_interop_root_log_index >= interop_root_log_start_index,
+                "First interop root log index must be greater than or equal to interop_root_log_start_index"
+            );
+        }
+
         Self {
             block_context,
             starting_l1_priority_id,
+            interop_root_log_start_index,
             transactions,
             previous_block_timestamp,
             node_version,
