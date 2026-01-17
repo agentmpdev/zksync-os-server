@@ -79,7 +79,7 @@ async fn find_latest_l1_revert(
         "checking for revert events"
     );
 
-    let blocks_to_scan = latest_block - start_block_number + 1;
+    let blocks_to_scan = latest_block + 1 - start_block_number;
     if blocks_to_scan > MAX_L1_BLOCKS_TO_SCAN_LINEARLY {
         tracing::warn!(
             blocks_to_scan,
