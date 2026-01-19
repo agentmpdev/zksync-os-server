@@ -47,13 +47,9 @@ pub struct ReplayRecord {
     pub block_output_hash: B256,
     /// Forced preimages to be included before the block execution.
     pub force_preimages: Vec<(B256, Vec<u8>)>,
-    /// Log index from which to start scanning for interop roots
-    /// This is the log index of the first interop root in the block
-    /// Should be stored in record even if indexes mapping is empty to be able to restore the state of watcher
-    pub interop_root_log_start_index: InteropRootsLogIndex,
-    /// Mapping of interop root transaction hashes to their log indexes
-    /// This should be monotonically increasing by log index
-    pub interop_root_indexes: Vec<(B256, InteropRootsLogIndex)>,
+    /// Last event index of the interop root tx executed in the block
+    /// Should be used as a starting point for the next block to continue watching for interop roots
+    pub last_interop_event_index: InteropRootsLogIndex,
 }
 
 impl ReplayRecord {
@@ -89,8 +85,7 @@ impl ReplayRecord {
             protocol_version,
             block_output_hash,
             force_preimages,
-            interop_root_log_start_index: InteropRootsLogIndex::default(),
-            interop_root_indexes: vec![],
+            last_interop_event_index: InteropRootsLogIndex::default(),
         }
     }
 }

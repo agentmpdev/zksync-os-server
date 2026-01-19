@@ -4,7 +4,7 @@
 //! surrounding logic.
 
 use crate::wire::replays::{WireReplayRecord, v0, v1, v2};
-use crate::wire::{BlockHashes, ForcedPreimage, InteropRootMetadata};
+use crate::wire::{BlockHashes, ForcedPreimage};
 use alloy::consensus::crypto::RecoveryError;
 use alloy::primitives::{BlockNumber, Bytes};
 use zksync_os_interface::types::BlockContext as InterfaceBlockContext;
@@ -48,8 +48,7 @@ impl TryFrom<v0::ReplayRecord> for StorageReplayRecord {
             protocol_version: ProtocolSemanticVersion::new(0, 0, 0),
             block_output_hash: Default::default(),
             force_preimages: vec![],
-            interop_root_log_start_index: InteropRootsLogIndex::default(),
-            interop_root_indexes: vec![],
+            last_interop_event_index: InteropRootsLogIndex::default(),
         })
     }
 }
@@ -151,8 +150,7 @@ impl TryFrom<v1::ReplayRecord> for StorageReplayRecord {
                 .into_iter()
                 .map(|p| (p.hash, p.preimage.into()))
                 .collect(),
-            interop_root_log_start_index: InteropRootsLogIndex::default(),
-            interop_root_indexes: vec![],
+            last_interop_event_index: InteropRootsLogIndex::default(),
         })
     }
 }
@@ -212,12 +210,7 @@ impl From<StorageReplayRecord> for v2::ReplayRecord {
                     preimage: Bytes::from(preimage),
                 })
                 .collect(),
-            interop_root_log_start_index: value.interop_root_log_start_index,
-            interop_root_indexes: value
-                .interop_root_indexes
-                .into_iter()
-                .map(|(hash, log_index)| InteropRootMetadata { hash, log_index })
-                .collect(),
+            last_interop_event_index: value.last_interop_event_index,
         }
     }
 }
@@ -264,12 +257,7 @@ impl TryFrom<v2::ReplayRecord> for StorageReplayRecord {
                 .into_iter()
                 .map(|p| (p.hash, p.preimage.into()))
                 .collect(),
-            interop_root_log_start_index: value.interop_root_log_start_index,
-            interop_root_indexes: value
-                .interop_root_indexes
-                .into_iter()
-                .map(|m| (m.hash, m.log_index))
-                .collect(),
+            last_interop_event_index: value.last_interop_event_index,
         })
     }
 }
