@@ -67,6 +67,12 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
     // seal_reason must only be used for observability - handling must remain generic
     let seal_reason = loop {
         latency_tracker.enter_state(SequencerState::WaitingForTx);
+
+        // FIXME: huge hack to allow one tx per block
+        if executed_txs.len() > 0 {
+            break SealReason::Timeout;
+        }
+
         tokio::select! {
             /* -------- deadline branch ------------------------------ */
             _ = async {
@@ -81,7 +87,6 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
                                "deadline reached → sealing");
                 break SealReason::Timeout;                                     // leave the loop ⇒ seal
             }
-
             /* -------- stream branch ------------------------------- */
             maybe_tx = command.tx_source.next() => {
                 latency_tracker.enter_state(SequencerState::Execution);
