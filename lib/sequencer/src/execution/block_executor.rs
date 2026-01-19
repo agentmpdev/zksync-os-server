@@ -182,7 +182,7 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
                                 }
                                 match command.seal_policy {
                                     SealPolicy::Decide(_, limit) if executed_txs.len() >= limit => {
-                                    tracing::debug!(block = ctx.block_number,
+                                    tracing::debug!(block_number = ctx.block_number,
                                                    txs = executed_txs.len(),
                                                    "tx limit reached → sealing");
                                         break SealReason::TxCountLimit
@@ -247,13 +247,13 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
                     }
                     /* ----- got a transaction that cannot be included because of gas --- */
                     Some(_tx) => {
-                        tracing::debug!(block = ctx.block_number, "sealing block as next tx cannot be included");
+                        tracing::debug!(block_number = ctx.block_number, "sealing block as next tx cannot be included");
                         break SealReason::GasLimit;
                     }
                     /* ----- tx stream was exhausted  --------------------------- */
                     None => {
                         tracing::debug!(
-                            block = ctx.block_number,
+                            block_number = ctx.block_number,
                             txs = executed_txs.len(),
                             "stream exhausted → sealing"
                         );
