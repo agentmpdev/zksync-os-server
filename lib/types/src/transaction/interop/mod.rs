@@ -21,9 +21,6 @@ pub const L2_INTEROP_ROOT_STORAGE_ZKSYNC_OS_ADDRESS: Address =
 
 pub const INTEROP_ROOTS_TX_TYPE_ID: u8 = 125;
 
-// todo: Check if this value is good enough
-const DEFAULT_GAS_LIMIT: u64 = 72_000_000;
-
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct InteropRootsEnvelope {
     /// Hash of the transaction
@@ -86,7 +83,6 @@ impl InteropRootsEnvelope {
         };
 
         let transaction = InteropRootsTx {
-            gas_limit: DEFAULT_GAS_LIMIT,
             to: L2_INTEROP_ROOT_STORAGE_ZKSYNC_OS_ADDRESS,
             input: Bytes::from(calldata),
         };
@@ -270,7 +266,6 @@ mod tests {
         // See https://ethereum.github.io/execution-apis/api-documentation/
 
         let transaction = InteropRootsTx {
-            gas_limit: 0x10000,
             to: Default::default(),
             input: Default::default(),
         };
@@ -284,10 +279,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string_pretty(&tx).unwrap(),
             r#"{
-  "hash": "0xd06b6df7ff36db8daee83e3a8d5d0b1e349e57968054b3da83192341e195a848",
+  "hash": "0x0b5cf6f6f3b9deb0fd6cb66f51e15f4d751e0724401c2cd7b7df59489fe5f289",
   "initiator": "0x0000000000000000000000000000000000008001",
   "to": "0x0000000000000000000000000000000000000000",
-  "gas": "0x10000",
+  "gas": "0x0",
   "maxFeePerGas": "0x0",
   "maxPriorityFeePerGas": "0x0",
   "nonce": "0x0",
