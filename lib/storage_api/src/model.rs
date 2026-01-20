@@ -48,7 +48,8 @@ pub struct ReplayRecord {
     /// Forced preimages to be included before the block execution.
     pub force_preimages: Vec<(B256, Vec<u8>)>,
     /// Event index(block number and index in block) of the interop root tx executed first in the block
-    pub next_interop_event_index: InteropRootsLogIndex,
+    /// If there is no interop root tx in the block, equals to the previous block's value
+    pub starting_next_interop_event_index: InteropRootsLogIndex,
 }
 
 impl ReplayRecord {
@@ -75,6 +76,7 @@ impl ReplayRecord {
                 "First L1 tx priority id must match next_l1_priority_id"
             );
         }
+
         Self {
             block_context,
             starting_l1_priority_id,
@@ -84,7 +86,7 @@ impl ReplayRecord {
             protocol_version,
             block_output_hash,
             force_preimages,
-            next_interop_event_index: InteropRootsLogIndex::default(),
+            starting_next_interop_event_index: InteropRootsLogIndex::default(),
         }
     }
 }
