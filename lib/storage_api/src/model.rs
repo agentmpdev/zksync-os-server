@@ -49,7 +49,7 @@ pub struct ReplayRecord {
     pub force_preimages: Vec<(B256, Vec<u8>)>,
     /// Event index(block number and index in block) of the interop root tx executed first in the block
     /// If there is no interop root tx in the block, equals to the previous block's value
-    pub starting_next_interop_event_index: InteropRootsLogIndex,
+    pub starting_interop_event_index: InteropRootsLogIndex,
 }
 
 impl ReplayRecord {
@@ -86,7 +86,7 @@ impl ReplayRecord {
             protocol_version,
             block_output_hash,
             force_preimages,
-            starting_next_interop_event_index: InteropRootsLogIndex::default(),
+            starting_interop_event_index: InteropRootsLogIndex::default(),
         }
     }
 }

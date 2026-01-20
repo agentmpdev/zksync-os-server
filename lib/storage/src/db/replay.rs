@@ -103,7 +103,7 @@ impl BlockReplayStorage {
                     protocol_version: genesis_tx.protocol_version,
                     block_output_hash: B256::ZERO,
                     force_preimages: genesis_tx.force_deploy_preimages,
-                    starting_next_interop_event_index: InteropRootsLogIndex::default(),
+                    starting_interop_event_index: InteropRootsLogIndex::default(),
                 },
                 None,
             )
@@ -171,7 +171,7 @@ impl BlockReplayStorage {
         );
 
         let next_interop_event_index_value = bincode::serde::encode_to_vec(
-            &record.starting_next_interop_event_index,
+            &record.starting_interop_event_index,
             bincode::config::standard(),
         )
         .expect("Failed to serialize record.next_interop_event_index");
@@ -349,7 +349,7 @@ impl ReadReplay for BlockReplayStorage {
             protocol_version,
             block_output_hash: B256::from_slice(&block_output_hash),
             force_preimages,
-            starting_next_interop_event_index: next_interop_event_index,
+            starting_interop_event_index: next_interop_event_index,
         })
     }
 
