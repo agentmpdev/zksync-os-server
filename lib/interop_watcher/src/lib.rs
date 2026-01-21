@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use alloy::rpc::types::Filter;
+use alloy::rpc::types::{Filter, Log};
 use alloy::sol_types::SolEvent;
 use alloy::{
     primitives::Address,
@@ -13,6 +13,13 @@ use zksync_os_types::{InteropRootsEnvelope, InteropRootsLogIndex};
 
 pub const INTEROP_ROOTS_PER_IMPORT: u64 = 100;
 const LOOKBEHIND_BLOCKS: u64 = 1000;
+
+const TOO_MANY_RESULTS_INFURA: &str = "query returned more than";
+const TOO_MANY_RESULTS_ALCHEMY: &str = "response size exceeded";
+const TOO_MANY_RESULTS_RETH: &str = "length limit exceeded";
+const TOO_BIG_RANGE_RETH: &str = "query exceeds max block range";
+const TOO_MANY_RESULTS_CHAINSTACK: &str = "range limit exceeded";
+const REQUEST_REJECTED_503: &str = "Request rejected `503`";
 
 pub struct InteropRootsWatcher {
     contract_address: Address,
@@ -55,13 +62,7 @@ impl InteropRootsWatcher {
         start_log_index: InteropRootsLogIndex,
         to_block: u64,
     ) -> anyhow::Result<(Vec<InteropRoot>, InteropRootsLogIndex)> {
-        // todo: add binary search here to manage giant amount of logs
-        let filter = Filter::new()
-            .from_block(start_log_index.block_number)
-            .to_block(to_block)
-            .address(self.contract_address)
-            .event_signature(NewInteropRoot::SIGNATURE_HASH);
-        let logs = self.provider.get_logs(&filter).await?;
+        let logs = self.get_events_recursively(start_log_index.block_number, to_block).await?;
 
         if logs.is_empty() {
             return Ok((Vec::new(), InteropRootsLogIndex::default()));
@@ -122,6 +123,44 @@ impl InteropRootsWatcher {
         };
 
         Ok((interop_roots, last_log_index))
+    }
+
+    #[async_recursion::async_recursion]
+    async fn get_events_recursively(
+        &mut self,
+        from_block: u64,
+        to_block: u64,
+    ) -> anyhow::Result<Vec<Log>> {
+        let filter = Filter::new()
+            .from_block(from_block)
+            .to_block(to_block)
+            .address(self.contract_address)
+            .event_signature(NewInteropRoot::SIGNATURE_HASH);
+
+        let result = self.provider.get_logs(&filter).await;
+
+        match result {
+            Ok(logs) => return Ok(logs),
+            Err(err) => {
+                if let Some(error_resp) = err.as_error_resp()
+                    && (error_resp.message.contains(TOO_MANY_RESULTS_INFURA)
+                        || error_resp.message.contains(TOO_MANY_RESULTS_ALCHEMY)
+                        || error_resp.message.contains(TOO_MANY_RESULTS_RETH)
+                        || error_resp.message.contains(TOO_BIG_RANGE_RETH)
+                        || error_resp.message.contains(TOO_MANY_RESULTS_CHAINSTACK)
+                        || error_resp.message.contains(REQUEST_REJECTED_503)) // maybe here also should be timeout
+                {
+                    let mid = (from_block + to_block) / 2;
+                    let mut first_half = self.get_events_recursively(from_block, mid).await?;
+                    let mut second_half = self.get_events_recursively(mid + 1, to_block).await?;
+                    first_half.append(&mut second_half);
+                    return Ok(first_half);
+                }
+                else {
+                    return Err(err.into());
+                }
+            }
+        }
     }
 
     async fn poll(&mut self) -> anyhow::Result<()> {

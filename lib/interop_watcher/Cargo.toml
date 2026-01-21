@@ -17,3 +17,4 @@ alloy = { workspace = true, features = ["reqwest", "rpc-types", "providers"] }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+async-recursion.workspace = true
