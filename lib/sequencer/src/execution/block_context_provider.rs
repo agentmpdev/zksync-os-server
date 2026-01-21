@@ -18,7 +18,7 @@ use zksync_os_mempool::{
 use zksync_os_storage_api::ReplayRecord;
 use zksync_os_types::{
     ExecutionVersion, InteropRootsEnvelope, InteropRootsLogIndex, L1PriorityEnvelope, L2Envelope,
-    ProtocolSemanticVersion, PubdataMode, UpgradeTransaction, ZkEnvelope,
+    ProtocolSemanticVersion, UpgradeTransaction, ZkEnvelope,
 };
 
 /// Component that turns `BlockCommand`s into `PreparedBlockCommand`s.
