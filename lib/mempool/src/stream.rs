@@ -84,9 +84,10 @@ impl Stream for BestTransactionsStream<'_> {
             }
 
             if !this.txs_already_provided || this.first_tx_is_interop {
-                // todo: ensure this is correct ordering of transactions
                 match this.interop_transactions.poll_recv(cx) {
-                    Poll::Ready(Some(tx)) => return Poll::Ready(Some(ZkTransaction::from(tx))),
+                    Poll::Ready(Some(tx)) => {
+                        return Poll::Ready(Some(ZkTransaction::from(tx)));
+                    }
                     Poll::Pending => {}
                     Poll::Ready(None) => todo!("channel closed"),
                 }
@@ -130,46 +131,39 @@ impl TxStream for BestTransactionsStream<'_> {
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
-pub enum PeekedTxType {
-    Upgrade(UpgradeTransaction),
-    Interop,
-    Regular,
+pub struct PeekedInfo {
+    pub upgrade_info: Option<UpgradeTransaction>,
+    pub is_peeked_tx_interop: bool,
 }
 
 impl BestTransactionsStream<'_> {
     /// Waits until there is a next transaction and returns a reference to it.
     /// Does not consume the transaction, it will be returned on the next poll.
     /// Returns `None` if the stream is closed.
-    /// Returns `Some(PeekedTxType::Regular)` if there is a transaction in the stream, but it's not an upgrade or interop transaction.
-    /// Returns `Some(PeekedTxType::Upgrade(upgrade_tx))` if the next transaction is an upgrade transaction.
-    /// Returns `Some(PeekedTxType::Interop)` if the next transaction is an interop transaction.
+    /// Returns `Some(PeekedInfo)` with peeked information, such as if there is an upgrade info in the stream
+    /// and if the peeked transaction is an interop transaction.
     // TODO: this interface leaks implementation details about the internal structure, and in general
     // this information is only needed for the `BlockContextProvider` which already has access to the stream.
     // This was introduced only because upgrade transaction can appear after we started waiting for the
     // first tx, and we need protocol upgrade info to initialize block context.
     // Consider refactoring this later.
-    pub async fn wait_peek(&mut self) -> Option<PeekedTxType> {
+    pub async fn wait_peek(&mut self) -> Option<PeekedInfo> {
         if self.peeked_tx.is_none() {
             self.peeked_tx = self.next().await;
             self.txs_already_provided = true; // TODO: implicit expectation that this method is _guaranteed_ to be called before using the stream.
         }
 
-        match &self.peeked_tx {
-            None => None,
-            Some(tx) => match tx.tx_type() {
-                ZkTxType::InteropRoots => {
-                    self.first_tx_is_interop = true;
-                    Some(PeekedTxType::Interop)
-                }
-                ZkTxType::Upgrade => Some(PeekedTxType::Upgrade(
-                    self.peeked_upgrade_info
-                        .clone()
-                        .expect("upgrade transaction should be available"),
-                )),
-                ZkTxType::L1 => Some(PeekedTxType::Regular),
-                ZkTxType::L2(_) => Some(PeekedTxType::Regular),
-            },
+        if self.peeked_tx.is_none() {
+            return None;
         }
+
+        Some(PeekedInfo {
+            upgrade_info: self.peeked_upgrade_info.clone(),
+            is_peeked_tx_interop: matches!(
+                self.peeked_tx.clone().unwrap().envelope().tx_type(),
+                ZkTxType::InteropRoots
+            ),
+        })
     }
 }
 

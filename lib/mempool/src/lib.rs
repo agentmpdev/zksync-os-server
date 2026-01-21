@@ -1,7 +1,5 @@
 mod stream;
-pub use stream::{
-    BestTransactionsStream, PeekedTxType, ReplayTxStream, TxStream, best_transactions,
-};
+pub use stream::{BestTransactionsStream, PeekedInfo, ReplayTxStream, TxStream, best_transactions};
 
 mod traits;
 pub use traits::L2TransactionPool;

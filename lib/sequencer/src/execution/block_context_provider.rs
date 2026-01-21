@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 use zksync_os_interface::types::{BlockContext, BlockHashes, BlockOutput};
 use zksync_os_mempool::{
-    CanonicalStateUpdate, L2TransactionPool, PeekedTxType, PoolUpdateKind, ReplayTxStream,
+    CanonicalStateUpdate, L2TransactionPool, PeekedInfo, PoolUpdateKind, ReplayTxStream,
     best_transactions,
 };
 use zksync_os_storage_api::ReplayRecord;
@@ -106,22 +106,25 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                 );
 
                 // Peek to ensure that at least one transaction is available so that timestamp is accurate.
-                let peeked_tx = best_txs.wait_peek().await;
-                if peeked_tx.is_none() {
+                let peeked_info = best_txs.wait_peek().await;
+
+                let Some(PeekedInfo {
+                    upgrade_info,
+                    is_peeked_tx_interop: is_interop_only_block,
+                }) = peeked_info
+                else {
                     return Err(anyhow::anyhow!(
                         "BestTransactionsStream closed unexpectedly for block {}",
                         produce_command.block_number
                     ));
-                }
+                };
 
                 let timestamp = (millis_since_epoch() / 1000) as u64;
-
-                let is_interop_only_block = matches!(peeked_tx, Some(PeekedTxType::Interop));
 
                 // Check if we peeked an upgrade transaction info.
                 // It is possible that we peek an upgrade with version <= self.protocol_version
                 // since we do not consume patch upgrades when replaying/rebuilding blocks. Such upgrade can be safely skipped.
-                let force_preimages = if let Some(PeekedTxType::Upgrade(upgrade_tx)) = peeked_tx
+                let force_preimages = if let Some(upgrade_tx) = upgrade_info
                     && upgrade_tx.protocol_version > self.protocol_version
                 {
                     tracing::info!(
