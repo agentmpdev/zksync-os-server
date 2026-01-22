@@ -1,5 +1,6 @@
 general:
-  ephemeral: true
+  ephemeral: false
+  rocks_db_path: "./db/chain_6565"
 
 genesis:
   bridgehub_address: "0x19412d30dd839be35847a6c2162bbc4ae774db46"
@@ -19,3 +20,7 @@ external_price_api_client:
   source: "Forced"
   forced_prices:
     "0x0000000000000000000000000000000000000001": 3000
+
+prover_api:
+  object_store:
+    file_backed_base_path: "./db/shared1"

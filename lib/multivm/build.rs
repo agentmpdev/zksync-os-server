@@ -46,7 +46,11 @@ fn main() {
             std::fs::write(path, body).expect("failed to write file");
         }
 
-        let snake_case_version = tag.trim_start_matches("v").replace('.', "_");
+        let snake_case_version = if tag.starts_with("v") {
+            tag.trim_start_matches("v").replace('.', "_")
+        } else {
+            "0_2_5".to_string()
+        };
         println!("cargo:rustc-env=ZKSYNC_OS_{snake_case_version}_SOURCE_PATH={dir}");
     }
 }
