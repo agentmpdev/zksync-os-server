@@ -127,10 +127,15 @@ impl InteropRootsEnvelope {
             "Sequencer doesn't support multiple interop roots in single transaction yet"
         );
 
-        let calldata = addInteropRootCall {
-            chainId: interop_roots[0].chainId,
-            blockOrBatchNumber: interop_roots[0].blockOrBatchNumber,
-            sides: interop_roots[0].sides.clone(),
+        // let calldata = addInteropRootCall {
+        //     chainId: interop_roots[0].chainId,
+        //     blockOrBatchNumber: interop_roots[0].blockOrBatchNumber,
+        //     sides: interop_roots[0].sides.clone(),
+        // }
+        // .abi_encode();
+
+        let calldata = addInteropRootsInBatchCall {
+            interopRootsInput: interop_roots,
         }
         .abi_encode();
 
