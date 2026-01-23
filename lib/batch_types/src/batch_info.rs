@@ -236,7 +236,7 @@ impl BatchInfo {
         }
     }
 
-    fn read_aggregated_root(mut state: impl ReadStorage) -> B256 {
+    pub fn read_aggregated_root(mut state: impl ReadStorage) -> B256 {
         const L2_MESSAGE_ROOT_ADDRESS: Address =
             address!("0x0000000000000000000000000000000000010005");
         const AGG_TREE_HEIGHT_KEY: B256 = B256::with_last_byte(0x04);

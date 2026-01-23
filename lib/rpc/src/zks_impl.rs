@@ -5,10 +5,11 @@ use alloy::rpc::types::Index;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use std::sync::Arc;
+use zksync_os_batch_types::BatchInfo;
 use zksync_os_genesis::{GenesisInput, GenesisInputSource};
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
 use zksync_os_rpc_api::{types::BlockMetadata, types::L2ToL1LogProof, zks::ZksApiServer};
-use zksync_os_storage_api::RepositoryError;
+use zksync_os_storage_api::{RepositoryError, StateError};
 use zksync_os_types::L2_TO_L1_TREE_SIZE;
 
 const LOG_PROOF_SUPPORTED_METADATA_VERSION: u8 = 1;
@@ -103,8 +104,9 @@ impl<RpcStorage: ReadRpcStorage> ZksNamespace<RpcStorage> {
             MiniMerkleTree::new(merkle_tree_leaves.into_iter(), Some(L2_TO_L1_TREE_SIZE))
                 .merkle_root_and_path(l1_log_index);
 
-        // The result should be Keccak(l2_l1_local_root, aggregated_root) but we don't compute aggregated root yet
-        let aggregated_root = B256::new([0u8; 32]);
+        let state = self.storage.state_view_at(to_block)?;
+        // The result should be Keccak(l2_l1_local_root, aggregated_root).
+        let aggregated_root = BatchInfo::read_aggregated_root(state);
         let root = keccak256([local_root.0, aggregated_root.0].concat());
 
         let log_leaf_proof = proof
@@ -225,4 +227,6 @@ pub enum ZksError {
     Repository(#[from] RepositoryError),
     #[error(transparent)]
     GenesisSource(anyhow::Error),
+    #[error(transparent)]
+    State(#[from] StateError),
 }
