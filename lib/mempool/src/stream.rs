@@ -46,7 +46,7 @@ impl InteropRootsAccumulator {
     }
 
     /// Adds a root to the accumulator
-    /// 
+    ///
     /// Returns:
     /// - `Some(envelope)` if the limit of roots amount is reached and we can return the transaction
     /// - `None` if the limit of roots amount is not reached yet
@@ -64,7 +64,7 @@ impl InteropRootsAccumulator {
     }
 
     /// Takes the transaction envelope if available
-    /// 
+    ///
     /// Returns:
     /// - `Some(envelope)` if there are roots accumulated
     /// - `None` if there are no roots in accumulator
