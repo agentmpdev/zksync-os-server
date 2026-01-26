@@ -143,7 +143,7 @@ impl InteropRootsEnvelope {
     }
 
     pub fn interop_roots_count(&self) -> u64 {
-        addInteropRootsInBatchCall::abi_decode(&self.inner.input())
+        addInteropRootsInBatchCall::abi_decode(self.inner.input())
             .expect("failed to decode interop roots")
             .interopRootsInput
             .len() as u64
