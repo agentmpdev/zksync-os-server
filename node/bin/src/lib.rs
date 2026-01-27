@@ -669,7 +669,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         // External Node
         run_en_pipeline(
             &config,
-            batch_storage.clone(),
+            committed_batch_provider,
             node_startup_state,
             block_replay_storage.clone(),
             &mut tasks,
@@ -789,12 +789,12 @@ async fn run_main_node_pipeline(
         .general_config
         .rocks_db_path
         .join(PRIORITY_TREE_DB_NAME);
-    let internal_config_path = config
-        .general_config
-        .rocks_db_path
-        .join(INTERNAL_CONFIG_FILE_NAME);
-    let internal_config_manager = InternalConfigManager::new(internal_config_path)
-        .expect("Failed to initialize InternalConfigManager");
+    let internal_config_manager = init_and_report_internal_config_manager(
+        config
+            .general_config
+            .rocks_db_path
+            .join(INTERNAL_CONFIG_FILE_NAME),
+    );
 
     Pipeline::new()
         .pipe(MainNodeCommandSource {
@@ -852,7 +852,7 @@ async fn run_main_node_pipeline(
             batcher_config: config.batcher_config.clone(),
             pubdata_mode: config.l1_sender_config.pubdata_mode,
             sidecar_sender,
-            committed_batch_provider,
+            committed_batch_provider: committed_batch_provider.clone(),
         })
         .pipe(BatchVerificationPipelineStep::new(
             config.batch_verification_config.clone().into(),
@@ -887,8 +887,8 @@ async fn run_main_node_pipeline(
             PriorityTreePipelineStep::new(
                 block_replay_storage.clone(),
                 &priority_tree_db_path,
-                batch_storage.clone(),
                 finality,
+                committed_batch_provider,
             )
             .await
             .unwrap(),
@@ -907,7 +907,7 @@ async fn run_main_node_pipeline(
 #[allow(clippy::too_many_arguments)]
 async fn run_en_pipeline(
     config: &Config,
-    batch_storage: ProofStorage,
+    committed_batch_provider: CommittedBatchProvider,
     node_state_on_startup: NodeStateOnStartup,
     block_replay_storage: impl WriteReplay + Clone,
     tasks: &mut JoinSet<()>,
@@ -921,12 +921,13 @@ async fn run_en_pipeline(
     tx_acceptance_state_sender: watch::Sender<TransactionAcceptanceState>,
     chain_id: u64,
 ) {
-    let internal_config_path = config
-        .general_config
-        .rocks_db_path
-        .join(INTERNAL_CONFIG_FILE_NAME);
-    let internal_config_manager = InternalConfigManager::new(internal_config_path)
-        .expect("Failed to initialize InternalConfigManager");
+    let internal_config_manager = init_and_report_internal_config_manager(
+        config
+            .general_config
+            .rocks_db_path
+            .join(INTERNAL_CONFIG_FILE_NAME),
+    );
+
     Pipeline::new()
         .pipe(ExternalNodeCommandSource {
             starting_block,
@@ -986,11 +987,8 @@ async fn run_en_pipeline(
                     .rocks_db_path
                     .join(PRIORITY_TREE_DB_NAME),
             ),
-            batch_storage,
             finality.clone(),
-            node_state_on_startup
-                .last_l1_executed_block
-                .min(node_state_on_startup.block_replay_storage_last_block),
+            committed_batch_provider,
         )
         .await
         .unwrap();
@@ -1022,6 +1020,23 @@ fn report_exit<T, E: std::fmt::Debug>(name: &'static str) -> impl Fn(Result<T, E
         Ok(_) => tracing::warn!("{name} component unexpectedly exited"),
         Err(err) => tracing::error!(?err, "{name} component failed"),
     }
+}
+
+fn init_and_report_internal_config_manager(
+    internal_config_path: std::path::PathBuf,
+) -> InternalConfigManager {
+    let internal_config_manager = InternalConfigManager::new(internal_config_path)
+        .expect("Failed to initialize InternalConfigManager");
+
+    // Report blacklisted addresses metric
+    let internal_config = internal_config_manager
+        .read_config()
+        .expect("Failed to read internal config");
+    GENERAL_METRICS
+        .blacklisted_addresses_count
+        .set(internal_config.l2_signer_blacklist.len());
+
+    internal_config_manager
 }
 
 async fn commit_proof_execute_block_numbers(
