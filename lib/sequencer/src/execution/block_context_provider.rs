@@ -365,7 +365,6 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                 index_in_block: last_interop_log_index.index_in_block + 1,
             };
         }
-
         EXECUTION_METRICS
             .next_l1_priority_id
             .set(self.next_l1_priority_id);

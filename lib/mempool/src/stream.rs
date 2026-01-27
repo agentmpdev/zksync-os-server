@@ -121,7 +121,6 @@ impl Stream for BestTransactionsStream<'_> {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-
         loop {
             if let Some(tx) = this.peeked_tx.take() {
                 return Poll::Ready(Some(tx));
@@ -145,7 +144,6 @@ impl Stream for BestTransactionsStream<'_> {
             }
 
             if !this.txs_already_provided || this.provide_only_interop_txs {
-                // todo: not sure this is correct
                 match this.interop_tx_stream.as_mut().poll_next(cx) {
                     Poll::Ready(Some(tx)) => {
                         // If first transaction in stream was interop one we should provide only interop transactions
@@ -157,10 +155,7 @@ impl Stream for BestTransactionsStream<'_> {
                     }
                     // This arm is reachable in case if first transaction wasn't interop, so we should try executing other transactions
                     Poll::Pending => {}
-                    Poll::Ready(None) => {
-                        // we should not return anything if the stream was closed
-                        return Poll::Ready(None);
-                    }
+                    Poll::Ready(None) => return Poll::Ready(None),
                 }
             }
 

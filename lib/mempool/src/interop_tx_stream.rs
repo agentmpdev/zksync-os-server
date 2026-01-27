@@ -12,6 +12,9 @@ use zksync_os_types::{
 
 const INTEROP_ROOTS_PER_IMPORT: usize = 100;
 
+/// Stream that accumulates interop roots and produces interop transactions
+/// It also keeps track of sent roots to be able to return them back to stream
+/// in case tx was excluded from the block
 pub struct InteropTxStream {
     receiver: mpsc::Receiver<IndexedInteropRoot>,
     pending_roots: VecDeque<IndexedInteropRoot>,
@@ -23,7 +26,6 @@ impl Stream for InteropTxStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-
         loop {
             match this.receiver.poll_recv(cx) {
                 Poll::Ready(Some(root)) => {
@@ -55,6 +57,7 @@ impl InteropTxStream {
         }
     }
 
+    /// Add a new root to pending roots and return transaction if the limit of interop roots per import is reached
     fn add_root_and_try_take_tx(
         &mut self,
         root: IndexedInteropRoot,
@@ -68,6 +71,7 @@ impl InteropTxStream {
         }
     }
 
+    /// Take a transaction from pending roots(not depending on the amount)
     fn take_tx(&mut self) -> Option<IndexedInteropRootsEnvelope> {
         if self.pending_roots.is_empty() {
             None
@@ -85,7 +89,11 @@ impl InteropTxStream {
         }
     }
 
-    async fn take_root(&mut self) -> Option<IndexedInteropRoot> {
+    /// Take next root in the following order:
+    /// - used roots
+    /// - pending roots
+    /// - receiver
+    async fn take_next_root(&mut self) -> Option<IndexedInteropRoot> {
         if let Some(root) = self.used_roots.pop_front() {
             Some(root)
         } else if let Some(root) = self.pending_roots.pop_front() {
@@ -95,6 +103,8 @@ impl InteropTxStream {
         }
     }
 
+    /// Cleans up the stream and removes all roots that were sent in transactions
+    /// Returns the last log index of executed interop root
     pub async fn on_canonical_state_change(
         &mut self,
         txs: Vec<InteropRootsEnvelope>,
@@ -103,7 +113,7 @@ impl InteropTxStream {
         for tx in txs {
             let mut roots = Vec::new();
             for _ in 0..tx.interop_roots_count() {
-                roots.push(self.take_root().await.unwrap());
+                roots.push(self.take_next_root().await.unwrap());
 
                 let envelope = InteropRootsEnvelope::from_interop_roots(
                     roots.iter().map(|r| r.root.clone()).collect(),
@@ -117,6 +127,7 @@ impl InteropTxStream {
 
         assert!(self.pending_roots.is_empty());
 
+        // Clear used roots that were left in the buffer and move them to pending
         self.pending_roots.extend(self.used_roots.drain(..));
 
         log_index
