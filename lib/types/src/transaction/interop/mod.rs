@@ -7,7 +7,7 @@ use alloy::primitives::ChainId;
 use alloy::primitives::{Address, B256, Bytes, TxKind, U256, address};
 use alloy::rpc::types::{AccessList, SignedAuthorization};
 use alloy::sol_types::SolCall;
-use alloy_rlp::{BufMut, Decodable, Encodable};
+use alloy_rlp::{BufMut, Encodable};
 use serde::{Deserialize, Serialize};
 use zksync_os_contract_interface::{IMessageRoot::addInteropRootCall, InteropRoot};
 
