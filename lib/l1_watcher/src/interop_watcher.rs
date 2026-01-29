@@ -142,7 +142,10 @@ impl ProcessL1Event for InteropWatcher {
         };
 
         self.output
-            .send(indexed_envelope)
+            .send(IndexedInteropRoot {
+                log_index: current_log_index,
+                root: interop_root,
+            })
             .await
             .map_err(|_| L1WatcherError::OutputClosed)?;
 

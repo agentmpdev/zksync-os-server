@@ -1,5 +1,5 @@
-use crate::L2TransactionPool;
 use crate::transaction::L2PooledTransaction;
+use crate::{InteropTxStream, L2TransactionPool};
 use alloy::consensus::transaction::Recovered;
 use alloy::primitives::TxHash;
 use futures::{Stream, StreamExt};
@@ -10,10 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
-use zksync_os_types::{
-    IndexedInteropRootsEnvelope, L1PriorityEnvelope, L1UpgradeEnvelope, L2Envelope, L2Transaction,
-    UpgradeTransaction, ZkTransaction,
-};
+use zksync_os_types::{L1PriorityEnvelope, L2Envelope, UpgradeTransaction, ZkTransaction};
 
 pub trait TxStream: Stream {
     fn mark_last_tx_as_invalid(self: Pin<&mut Self>);
@@ -22,90 +19,29 @@ pub trait TxStream: Stream {
 pub struct BestTransactionsStream<'a> {
     l1_transactions: &'a mut mpsc::Receiver<L1PriorityEnvelope>,
     pending_upgrade_transactions: &'a mut mpsc::Receiver<UpgradeTransaction>,
-    interop_transactions: &'a mut mpsc::Receiver<IndexedInteropRootsEnvelope>,
+    interop_tx_stream: &'a mut InteropTxStream,
     pending_transactions_listener: mpsc::Receiver<TxHash>,
     best_l2_transactions:
         Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<L2PooledTransaction>>>>,
     last_polled_l2_tx: Option<Arc<ValidPoolTransaction<L2PooledTransaction>>>,
-    peeked_tx: Option<ZkPoolTransaction>,
+    peeked_tx: Option<ZkTransaction>,
     peeked_upgrade_info: Option<UpgradeTransaction>,
     txs_already_provided: bool,
     provide_only_interop_txs: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ZkPoolTransaction {
-    inner: ZkTransaction,
-    metadata: Option<ZkTransactionMetadata>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ZkTransactionMetadata {
-    // log id of interop root
-    Interop(u64),
-}
-
-impl ZkPoolTransaction {
-    pub fn unchecked_new(tx: ZkTransaction) -> Self {
-        Self {
-            inner: tx,
-            metadata: None,
-        }
-    }
-
-    pub fn into_parts(self) -> (ZkTransaction, Option<ZkTransactionMetadata>) {
-        (self.inner, self.metadata)
-    }
-}
-
-impl From<L1PriorityEnvelope> for ZkPoolTransaction {
-    fn from(value: L1PriorityEnvelope) -> Self {
-        ZkPoolTransaction {
-            inner: value.into(),
-            metadata: None,
-        }
-    }
-}
-
-impl From<L1UpgradeEnvelope> for ZkPoolTransaction {
-    fn from(value: L1UpgradeEnvelope) -> Self {
-        ZkPoolTransaction {
-            inner: value.into(),
-            metadata: None,
-        }
-    }
-}
-
-impl From<L2Transaction> for ZkPoolTransaction {
-    fn from(value: L2Transaction) -> Self {
-        ZkPoolTransaction {
-            inner: value.into(),
-            metadata: None,
-        }
-    }
-}
-
-impl From<IndexedInteropRootsEnvelope> for ZkPoolTransaction {
-    fn from(value: IndexedInteropRootsEnvelope) -> Self {
-        ZkPoolTransaction {
-            inner: value.envelope.into(),
-            metadata: Some(ZkTransactionMetadata::Interop(value.log_id)),
-        }
-    }
 }
 
 /// Convenience method to stream best L2 transactions
 pub fn best_transactions<'a>(
     l2_mempool: &impl L2TransactionPool,
     l1_transactions: &'a mut mpsc::Receiver<L1PriorityEnvelope>,
-    interop_transactions: &'a mut mpsc::Receiver<IndexedInteropRootsEnvelope>,
+    interop_tx_stream: &'a mut InteropTxStream,
     pending_upgrade_transactions: &'a mut mpsc::Receiver<UpgradeTransaction>,
 ) -> BestTransactionsStream<'a> {
     let pending_transactions_listener =
         l2_mempool.pending_transactions_listener_for(TransactionListenerKind::All);
     BestTransactionsStream {
         l1_transactions,
-        interop_transactions,
+        interop_tx_stream,
         pending_upgrade_transactions,
         pending_transactions_listener,
         best_l2_transactions: l2_mempool.best_transactions(),
@@ -118,7 +54,7 @@ pub fn best_transactions<'a>(
 }
 
 impl Stream for BestTransactionsStream<'_> {
-    type Item = ZkPoolTransaction;
+    type Item = ZkTransaction;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -145,16 +81,16 @@ impl Stream for BestTransactionsStream<'_> {
             }
 
             if !this.txs_already_provided || this.provide_only_interop_txs {
-                match this.interop_transactions.poll_recv(cx) {
+                match this.interop_tx_stream.poll_next_unpin(cx) {
                     Poll::Ready(Some(tx)) => {
                         // If first transaction in stream was interop one we should provide only interop transactions
                         this.provide_only_interop_txs = true;
-                        return Poll::Ready(Some(tx.into()));
+                        return Poll::Ready(Some(tx.envelope.into()));
                     }
                     Poll::Pending if this.provide_only_interop_txs => {
                         return Poll::Pending;
                     }
-                    // This arm is reachable in case if first transaction wasn't interop and we can execute other transactions
+                    // This arm is reachable in case if first transaction wasn't interop, so we should try executing other transactions
                     Poll::Pending => {}
                     Poll::Ready(None) => return Poll::Ready(None),
                 }
@@ -229,10 +165,10 @@ pub struct ReplayTxStream {
 }
 
 impl Stream for ReplayTxStream {
-    type Item = ZkPoolTransaction;
+    type Item = ZkTransaction;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.iter.next().map(ZkPoolTransaction::unchecked_new))
+        Poll::Ready(self.iter.next())
     }
 }
 

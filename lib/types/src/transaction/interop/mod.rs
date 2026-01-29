@@ -9,7 +9,7 @@ use alloy::rpc::types::{AccessList, SignedAuthorization};
 use alloy::sol_types::SolCall;
 use alloy_rlp::{BufMut, Encodable};
 use serde::{Deserialize, Serialize};
-use zksync_os_contract_interface::{IMessageRoot::addInteropRootCall, InteropRoot};
+use zksync_os_contract_interface::{IMessageRoot::addInteropRootsInBatchCall, InteropRoot};
 
 pub mod tx;
 
@@ -33,6 +33,12 @@ pub struct InteropRootsEnvelope {
 pub struct IndexedInteropRootsEnvelope {
     pub log_id: u64,
     pub envelope: InteropRootsEnvelope,
+}
+
+#[derive(Clone)]
+pub struct IndexedInteropRoot {
+    pub log_index: InteropRootsLogIndex,
+    pub root: InteropRoot,
 }
 
 mod tx_serde {
@@ -91,16 +97,8 @@ mod tx_serde {
 
 impl InteropRootsEnvelope {
     pub fn from_interop_roots(interop_roots: Vec<InteropRoot>) -> Self {
-        assert_eq!(
-            interop_roots.len(),
-            1,
-            "Sequencer doesn't support multiple interop roots in single transaction yet"
-        );
-
-        let calldata = addInteropRootCall {
-            chainId: interop_roots[0].chainId,
-            blockOrBatchNumber: interop_roots[0].blockOrBatchNumber,
-            sides: interop_roots[0].sides.clone(),
+        let calldata = addInteropRootsInBatchCall {
+            interopRootsInput: interop_roots,
         }
         .abi_encode();
 
@@ -116,8 +114,10 @@ impl InteropRootsEnvelope {
     }
 
     pub fn interop_roots_count(&self) -> u64 {
-        // for now it is always expected to be 1, until we support multiple interop roots in single transaction
-        1
+        addInteropRootsInBatchCall::abi_decode(self.inner.input())
+            .expect("failed to decode interop roots")
+            .interopRootsInput
+            .len() as u64
     }
 
     pub fn hash(&self) -> &B256 {

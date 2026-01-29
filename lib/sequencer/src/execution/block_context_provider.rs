@@ -1,4 +1,3 @@
-use crate::execution::block_executor::BlockOutputExt;
 use crate::execution::fee_provider::{FeeParams, FeeProvider};
 use crate::execution::metrics::EXECUTION_METRICS;
 use crate::model::blocks::{
@@ -11,13 +10,14 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives::SealedBlock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
-use zksync_os_interface::types::{BlockContext, BlockHashes};
+use zksync_os_interface::types::{BlockContext, BlockHashes, BlockOutput};
 use zksync_os_mempool::{
-    CanonicalStateUpdate, L2TransactionPool, PoolUpdateKind, ReplayTxStream, best_transactions,
+    CanonicalStateUpdate, InteropTxStream, L2TransactionPool, PoolUpdateKind, ReplayTxStream,
+    best_transactions,
 };
 use zksync_os_storage_api::ReplayRecord;
 use zksync_os_types::{
-    ExecutionVersion, IndexedInteropRootsEnvelope, L1PriorityEnvelope, L2Envelope,
+    ExecutionVersion, InteropRootsLogIndex, L1PriorityEnvelope, L2Envelope,
     ProtocolSemanticVersion, UpgradeTransaction, ZkEnvelope,
 };
 
@@ -36,13 +36,14 @@ pub struct BlockContextProvider<Mempool> {
     next_interop_root_id: u64,
     l1_transactions: mpsc::Receiver<L1PriorityEnvelope>,
     upgrade_transactions: mpsc::Receiver<UpgradeTransaction>,
-    interop_transactions: mpsc::Receiver<IndexedInteropRootsEnvelope>,
+    interop_tx_stream: InteropTxStream,
     l2_mempool: Mempool,
     block_hashes_for_next_block: BlockHashes,
     previous_block_timestamp: u64,
     chain_id: u64,
     gas_limit: u64,
     pubdata_limit: u64,
+    interop_roots_per_block: u64,
     /// Protocol version to be used for the next produced block.
     /// Can change in runtime in case of upgrades.
     protocol_version: ProtocolSemanticVersion,
@@ -58,13 +59,14 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
         next_interop_root_id: u64,
         l1_transactions: mpsc::Receiver<L1PriorityEnvelope>,
         upgrade_transactions: mpsc::Receiver<UpgradeTransaction>,
-        interop_transactions: mpsc::Receiver<IndexedInteropRootsEnvelope>,
+        interop_tx_stream: InteropTxStream,
         l2_mempool: Mempool,
         block_hashes_for_next_block: BlockHashes,
         previous_block_timestamp: u64,
         chain_id: u64,
         gas_limit: u64,
         pubdata_limit: u64,
+        interop_roots_per_block: u64,
         protocol_version: ProtocolSemanticVersion,
         fee_collector_address: Address,
         last_constructed_block_ctx_sender: watch::Sender<Option<BlockContext>>,
@@ -75,13 +77,14 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
             next_interop_root_id,
             l1_transactions,
             upgrade_transactions,
-            interop_transactions,
+            interop_tx_stream,
             l2_mempool,
             block_hashes_for_next_block,
             previous_block_timestamp,
             chain_id,
             gas_limit,
             pubdata_limit,
+            interop_roots_per_block,
             protocol_version,
             fee_collector_address,
             last_constructed_block_ctx_sender,
@@ -101,7 +104,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                 let mut best_txs = best_transactions(
                     &self.l2_mempool,
                     &mut self.l1_transactions,
-                    &mut self.interop_transactions,
+                    &mut self.interop_tx_stream,
                     &mut self.upgrade_transactions,
                 );
 
@@ -187,6 +190,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages,
                     starting_interop_root_id: self.next_interop_root_id,
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
             BlockCommand::Replay(record) => {
@@ -216,6 +220,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages: record.force_preimages,
                     starting_interop_root_id: record.starting_interop_root_id,
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
             BlockCommand::Rebuild(rebuild) => {
@@ -296,6 +301,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages: rebuild.replay_record.force_preimages,
                     starting_interop_root_id: self.next_interop_root_id,
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
         };
@@ -309,23 +315,16 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
 
     pub async fn on_canonical_state_change(
         &mut self,
-        block_output: &BlockOutputExt,
+        block_output: &BlockOutput,
         replay_record: &ReplayRecord,
         cmd_type: BlockCommandType,
     ) {
         let mut l2_transactions = Vec::new();
+        let mut interop_txs = Vec::new();
         for tx in &replay_record.transactions {
             match tx.envelope() {
                 ZkEnvelope::InteropRoots(interop_tx) => {
-                    self.next_interop_root_id += interop_tx.interop_roots_count();
-                    if matches!(
-                        cmd_type,
-                        BlockCommandType::Replay | BlockCommandType::Rebuild
-                    ) {
-                        // If block is being replayed we must fetch equivalent interop root tx from SL
-                        let indexed_interop_tx = self.interop_transactions.recv().await.unwrap();
-                        assert_eq!(&indexed_interop_tx.envelope, interop_tx);
-                    }
+                    interop_txs.push(interop_tx.clone());
                 }
                 ZkEnvelope::L1(l1_tx) => {
                     self.next_l1_priority_id = l1_tx.priority_id() + 1;
@@ -358,6 +357,16 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
             }
         }
 
+        if let Some(last_interop_log_index) = self
+            .interop_tx_stream
+            .on_canonical_state_change(interop_txs)
+            .await
+        {
+            self.next_interop_event_index = InteropRootsLogIndex {
+                block_number: last_interop_log_index.block_number,
+                index_in_block: last_interop_log_index.index_in_block + 1,
+            };
+        }
         EXECUTION_METRICS
             .next_l1_priority_id
             .set(self.next_l1_priority_id);
