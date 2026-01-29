@@ -10,8 +10,6 @@ use zksync_os_types::{
     IndexedInteropRoot, IndexedInteropRootsEnvelope, InteropRootsEnvelope, InteropRootsLogIndex,
 };
 
-const INTEROP_ROOTS_PER_IMPORT: usize = 100;
-
 /// Stream that accumulates interop roots and produces interop transactions
 /// It also keeps track of sent roots to be able to return them back to stream
 /// in case tx was excluded from the block
@@ -19,6 +17,7 @@ pub struct InteropTxStream {
     receiver: mpsc::Receiver<IndexedInteropRoot>,
     pending_roots: VecDeque<IndexedInteropRoot>,
     used_roots: VecDeque<IndexedInteropRoot>,
+    interop_roots_per_tx: usize,
 }
 
 impl Stream for InteropTxStream {
@@ -49,11 +48,12 @@ impl Stream for InteropTxStream {
 }
 
 impl InteropTxStream {
-    pub fn new(receiver: mpsc::Receiver<IndexedInteropRoot>) -> Self {
+    pub fn new(receiver: mpsc::Receiver<IndexedInteropRoot>, interop_roots_per_tx: usize) -> Self {
         Self {
             receiver,
             pending_roots: VecDeque::new(),
             used_roots: VecDeque::new(),
+            interop_roots_per_tx,
         }
     }
 
@@ -64,7 +64,7 @@ impl InteropTxStream {
     ) -> Option<IndexedInteropRootsEnvelope> {
         self.pending_roots.push_back(root);
 
-        if self.pending_roots.len() == INTEROP_ROOTS_PER_IMPORT {
+        if self.pending_roots.len() >= self.interop_roots_per_tx {
             self.take_tx()
         } else {
             None
@@ -76,14 +76,20 @@ impl InteropTxStream {
         if self.pending_roots.is_empty() {
             None
         } else {
+            let amount_of_roots_to_take = self.pending_roots.len().min(self.interop_roots_per_tx);
+            let roots_to_consume = self
+                .pending_roots
+                .drain(..amount_of_roots_to_take)
+                .collect::<Vec<_>>();
+
             let tx = IndexedInteropRootsEnvelope {
                 log_index: self.pending_roots.back().unwrap().log_index.clone(),
                 envelope: InteropRootsEnvelope::from_interop_roots(
-                    self.pending_roots.iter().map(|r| r.root.clone()).collect(),
+                    roots_to_consume.iter().map(|r| r.root.clone()).collect(),
                 ),
             };
 
-            self.used_roots.extend(self.pending_roots.drain(..));
+            self.used_roots.extend(roots_to_consume);
 
             Some(tx)
         }
@@ -124,10 +130,13 @@ impl InteropTxStream {
             assert_eq!(&envelope, &tx);
         }
 
-        assert!(self.pending_roots.is_empty());
+        assert!(
+            self.pending_roots.is_empty(),
+            "Pending roots are expected to be empty when on_canonical_state_change is called"
+        );
 
-        // Clear used roots that were left in the buffer and move them to pending
-        self.pending_roots.extend(self.used_roots.drain(..));
+        // Clear used roots that were left in the buffer and move them to pending.
+        std::mem::swap(&mut self.pending_roots, &mut self.used_roots);
 
         log_index
     }

@@ -43,6 +43,7 @@ pub struct BlockContextProvider<Mempool> {
     chain_id: u64,
     gas_limit: u64,
     pubdata_limit: u64,
+    interop_roots_per_block: u64,
     /// Protocol version to be used for the next produced block.
     /// Can change in runtime in case of upgrades.
     protocol_version: ProtocolSemanticVersion,
@@ -65,6 +66,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
         chain_id: u64,
         gas_limit: u64,
         pubdata_limit: u64,
+        interop_roots_per_block: u64,
         protocol_version: ProtocolSemanticVersion,
         fee_collector_address: Address,
         last_constructed_block_ctx_sender: watch::Sender<Option<BlockContext>>,
@@ -82,6 +84,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
             chain_id,
             gas_limit,
             pubdata_limit,
+            interop_roots_per_block,
             protocol_version,
             fee_collector_address,
             last_constructed_block_ctx_sender,
@@ -101,7 +104,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                 let mut best_txs = best_transactions(
                     &self.l2_mempool,
                     &mut self.l1_transactions,
-                    Box::pin(&mut self.interop_tx_stream),
+                    &mut self.interop_tx_stream,
                     &mut self.upgrade_transactions,
                 );
 
@@ -187,6 +190,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages,
                     starting_interop_event_index: self.next_interop_event_index.clone(),
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
             BlockCommand::Replay(record) => {
@@ -216,6 +220,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages: record.force_preimages,
                     starting_interop_event_index: record.starting_interop_event_index.clone(),
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
             BlockCommand::Rebuild(rebuild) => {
@@ -296,6 +301,7 @@ impl<Mempool: L2TransactionPool> BlockContextProvider<Mempool> {
                     previous_block_timestamp: self.previous_block_timestamp,
                     force_preimages: rebuild.replay_record.force_preimages,
                     starting_interop_event_index: self.next_interop_event_index.clone(),
+                    interop_roots_per_block: self.interop_roots_per_block,
                 }
             }
         };

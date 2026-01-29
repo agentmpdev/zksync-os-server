@@ -23,8 +23,6 @@ use zksync_os_types::{ZkEnvelope, ZkTransaction, ZkTxType, ZksyncOsEncode};
 // a side effect of this is that it's harder to pass config values (normally we'd just pass the whole config object)
 // please be mindful when adding new parameters here
 
-pub const INTEROP_ROOTS_PER_BLOCK: u64 = 1000;
-
 pub async fn execute_block<R: ReadStateHistory + WriteState>(
     mut command: PreparedBlockCommand<'_>,
     state: R,
@@ -88,7 +86,7 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
             /* -------- stream branch ------------------------------- */
             maybe_tx = command.tx_source.next() => {
                 latency_tracker.enter_state(SequencerState::Execution);
-                let Some(pool_tx) = maybe_tx else {
+                let Some(tx) = maybe_tx else {
                     tracing::debug!(
                         block_number = ctx.block_number,
                         txs = executed_txs.len(),
@@ -97,9 +95,7 @@ pub async fn execute_block<R: ReadStateHistory + WriteState>(
                     break SealReason::TxStreamExhausted;
                 };
 
-                let (tx, _) = pool_tx.into_parts();
-
-                if let Some(reason) = should_exclude_and_seal(&ctx, cumulative_gas_used, interop_roots_count, &tx) {
+                if let Some(reason) = should_exclude_and_seal(&ctx, cumulative_gas_used, interop_roots_count, command.interop_roots_per_block, &tx) {
                     tracing::debug!(block_number = ctx.block_number, "sealing block as next tx cannot be included");
                     break reason;
                 }
@@ -354,13 +350,14 @@ fn should_exclude_and_seal(
     ctx: &BlockContext,
     cumulative_gas_used: u64,
     interop_roots_count: u64,
+    interop_roots_per_block: u64,
     tx: &ZkTransaction,
 ) -> Option<SealReason> {
     if cumulative_gas_used + tx.inner.gas_limit() > ctx.gas_limit {
         return Some(SealReason::GasLimit);
     }
     if let ZkEnvelope::InteropRoots(interop_roots_tx) = tx.inner.inner()
-        && interop_roots_count + interop_roots_tx.interop_roots_count() > INTEROP_ROOTS_PER_BLOCK
+        && interop_roots_count + interop_roots_tx.interop_roots_count() > interop_roots_per_block
     {
         return Some(SealReason::LimitedInteropOnlyBlock);
     }
