@@ -171,7 +171,7 @@ impl BlockReplayStorage {
         );
 
         let starting_interop_root_id_value = bincode::serde::encode_to_vec(
-            &record.starting_interop_root_id,
+            record.starting_interop_root_id,
             bincode::config::standard(),
         )
         .expect("Failed to serialize record.starting_interop_root_id");
