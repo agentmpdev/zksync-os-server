@@ -11,10 +11,8 @@ local-chains/
 │   ├── default/                 # Default (single-chain) setup
 │   │   ├── README.md            # Scenario-specific documentation
 │   │   ├── config.yaml          # Sequencer configuration
-│   │   ├── genesis.json         # Genesis configuration
 │   │   ├── wallets.yaml         # Wallets configuration
-│   │   ├── contracts.yaml       # Contracts configuration
-│   │   └── zkos-l1-state.json   # L1 state for this scenario
+│   │   └── contracts.yaml       # Contracts configuration
 │   ├── multi_chain/             # Multi-chain scenario
 │   │   ├── README.md            # Scenario-specific documentation
 │   │   ├── chain_6565.yaml      # Configuration for chain with ID 6565
@@ -22,16 +20,15 @@ local-chains/
 │   │   ├── wallets_6565.yaml    # Wallets for chain 6565
 │   │   ├── wallets_6566.yaml    # Wallets for chain 6566
 │   │   ├── contracts_6565.yaml  # Contracts for chain 6565
-│   │   ├── contracts_6566.yaml  # Contracts for chain 6566
-│   │   └── zkos-l1-state.json   # Shared L1 state for the multi-chain scenario
+│   │   └── contracts_6566.yaml  # Contracts for chain 6566
+│   ├── l1-state.json.gz         # Shared L1 state for protocol v30.2
+│   ├── genesis.json             # Genesis configuration for protocol v30.2
 │   └── versions.yaml            # Version metadata for protocol v30.2
 └── v31.0/                       # Protocol version v31.0
     ├── default/                 # Default (single-chain) setup
     │   ├── README.md            # Scenario-specific documentation
     │   ├── config.yaml          # Sequencer configuration
-    │   ├── genesis.json         # Genesis configuration
-    │   ├── wallets.yaml         # Wallets configuration
-    │   └── zkos-l1-state.json   # L1 state for this scenario
+    │   └── wallets.yaml         # Wallets configuration
     ├── multi_chain/             # Multi-chain scenario
     │   ├── README.md            # Scenario-specific documentation
     │   ├── chain_6565.yaml      # Configuration for chain with ID 6565
@@ -39,19 +36,20 @@ local-chains/
     │   ├── wallets_6565.yaml    # Wallets for chain 6565
     │   ├── wallets_6566.yaml    # Wallets for chain 6566
     │   ├── contracts_6565.yaml  # Contracts for chain 6565
-    │   ├── contracts_6566.yaml  # Contracts for chain 6566
-    │   └── zkos-l1-state.json   # Shared L1 state for the multi-chain scenario
-    └── versions.yaml            # Version metadata for protocol v31.0
+    │   └── contracts_6566.yaml  # Contracts for chain 6566
+│   ├── l1-state.json.gz         # Shared L1 state for protocol v31.0
+│   ├── genesis.json             # Genesis configuration for protocol v31.0
+│   └── versions.yaml            # Version metadata for protocol v31.0
 ```
 
 ## Configuration Files
 
-### `zkos-l1-state.json`
+### `l1-state.json.gz`
 
 L1 state snapshot for Anvil. Contains the deployed L1 contracts state that can be loaded with:
 
 ```bash
-anvil --load-state ./local-chains/v30.2/default/zkos-l1-state.json --port 8545
+anvil --load-state ./local-chains/v30.2/l1-state.json.gz --port 8545
 ```
 
 ### `config.yaml`
@@ -100,7 +98,7 @@ The `run_local.sh` script automates starting Anvil and chain node(s):
 
 #### How the Script Works
 
-1. **Validates configuration directory** - Checks that the directory exists and contains `zkos-l1-state.json`
+1. **Validates configuration directory** - Checks that the directory exists and `l1-state.json.gz` is in parent directory
 2. **Builds ZKsync OS**
 3. **Starts Anvil** - Loads the L1 state snapshot on port 8545
 4. **Waits for Anvil readiness** - Polls the JSON-RPC endpoint until Anvil responds (up to 30 seconds)
@@ -144,7 +142,7 @@ Follow the instructions in the [v30.2/multi_chain/README.md](./v30.2/multi_chain
 ### Anvil failed to start
 
 - Check if port 8545 is already in use: `lsof -i :8545`
-- Verify `zkos-l1-state.json` exists and is valid JSON
+- Verify `l1-state.json.gz` exists and is valid gzipped JSON
 
 ### Chain fails to start
 

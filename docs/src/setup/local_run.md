@@ -22,7 +22,7 @@ The `run_local.sh` script automates starting Anvil and chain node(s):
 To run node locally, first launch `anvil`:
 
 ```
-anvil --load-state ./local-chains/v30.2/default/zkos-l1-state.json --port 8545
+anvil --load-state ./local-chains/v30.2/l1-state.json.gz --port 8545
 ```
 
 then launch the server:

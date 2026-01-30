@@ -13,7 +13,7 @@ Configuration for running multiple ZKsync OS chains against a shared L1.
 
 ```bash
 # Terminal 1: Start Anvil with shared L1 state
-anvil --load-state ./local-chains/v30.2/multi_chain/zkos-l1-state.json --port 8545
+anvil --load-state ./local-chains/v30.2/l1-state.json.gz --port 8545
 
 # Terminal 2: Chain 1
 cargo run --release -- --config ./local-chains/v30.2/multi_chain/chain_6565.yaml
