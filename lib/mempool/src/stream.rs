@@ -84,7 +84,7 @@ impl Stream for BestTransactionsStream<'_> {
                 if let Some(tx) = this.interop_transactions.next() {
                     return Poll::Ready(Some(tx.envelope.into()));
                 }
-                return Poll::Ready(None);
+                return Poll::Pending;
             }
 
             match this.l1_transactions.poll_recv(cx) {

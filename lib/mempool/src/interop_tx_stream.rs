@@ -70,15 +70,17 @@ impl Iterator for InteropTransactions {
         }
 
         loop {
+            if let Some(envelope) = self.take_tx(false) {
+                return Some(envelope);
+            }
+
             match self.receiver.try_recv() {
                 Ok(root) => {
-                    if let Some(envelope) = self.add_root_and_try_take_tx(root) {
-                        return Some(envelope);
-                    }
+                    self.pending_roots.push_front(root);
                     continue;
                 }
                 Err(TryRecvError::Empty) | Err(TryRecvError::Lagged(_)) => {
-                    if let Some(envelope) = self.take_tx() {
+                    if let Some(envelope) = self.take_tx(true) {
                         return Some(envelope);
                     }
                     return None;
@@ -92,29 +94,20 @@ impl Iterator for InteropTransactions {
 }
 
 impl InteropTransactions {
-    /// Add a new root to pending roots and return transaction if the limit of interop roots per import is reached
-    fn add_root_and_try_take_tx(
-        &mut self,
-        root: IndexedInteropRoot,
-    ) -> Option<IndexedInteropRootsEnvelope> {
-        self.pending_roots.push_back(root);
-
-        if self.pending_roots.len() >= self.interop_roots_per_tx {
-            self.take_tx()
-        } else {
-            None
-        }
-    }
-
     /// Take a transaction from pending roots(not depending on the amount)
-    fn take_tx(&mut self) -> Option<IndexedInteropRootsEnvelope> {
-        if self.pending_roots.is_empty() {
+    fn take_tx(&mut self, allowed_to_take_remainder: bool) -> Option<IndexedInteropRootsEnvelope> {
+        if self.pending_roots.is_empty()
+            || (self.pending_roots.len() < self.interop_roots_per_tx && !allowed_to_take_remainder)
+        {
             None
         } else {
             let amount_of_roots_to_take = self.pending_roots.len().min(self.interop_roots_per_tx);
+            let starting_index = self.pending_roots.len() - amount_of_roots_to_take;
+
             let roots_to_consume = self
                 .pending_roots
-                .drain(..amount_of_roots_to_take)
+                .drain(starting_index..)
+                .rev() // reversing iterator as last element is the one received earliest
                 .collect::<Vec<_>>();
 
             let tx = IndexedInteropRootsEnvelope {
