@@ -1,16 +1,13 @@
 use alloy::consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
-use alloy::primitives::{Address, B256, U256, address, keccak256};
-use anyhow::Context;
+use alloy::primitives::{Address, B256, BlockNumber, U256, keccak256};
 use blake2::{Blake2s256, Digest};
 use ruint::aliases::B160;
 use serde::{Deserialize, Serialize};
+use std::ops;
 use std::ops::{Deref, DerefMut};
-use zk_ee::common_structs::derive_flat_storage_key;
 use zksync_os_contract_interface::models::{CommitBatchInfo, StoredBatchInfo};
-use zksync_os_interface::traits::ReadStorage;
 use zksync_os_interface::types::{BlockContext, BlockOutput};
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
-use zksync_os_storage_api::ReadStateHistory;
 use zksync_os_types::{
     L2_TO_L1_TREE_SIZE, L2ToL1Log, ProtocolSemanticVersion, PubdataMode, ZkEnvelope, ZkTransaction,
 };
@@ -33,7 +30,7 @@ pub struct BatchInfo {
 }
 
 impl BatchInfo {
-    pub fn new<ReadState: ReadStateHistory>(
+    pub fn new(
         blocks: Vec<(
             &BlockOutput,
             &BlockContext,
@@ -44,8 +41,8 @@ impl BatchInfo {
         chain_address: Address,
         batch_number: u64,
         pubdata_mode: PubdataMode,
-        read_state: &ReadState,
-    ) -> anyhow::Result<Self> {
+        aggregated_root: B256
+    ) -> Self {
         let mut priority_operations_hash = keccak256([]);
         let mut number_of_layer1_txs = 0;
         let mut total_pubdata = vec![];
@@ -129,11 +126,6 @@ impl BatchInfo {
         )
         .merkle_root();
 
-        let state_view = read_state
-            .state_view_at(last_block_output.header.number)
-            .context("Failed to get state view for L2 to L1 logs aggregated root calculation")?;
-        let aggregated_root = Self::read_aggregated_root(state_view);
-
         // The result should be Keccak(l2_l1_local_root, aggregated_root).
         let l2_to_l1_logs_root_hash = keccak256([l2_l1_local_root.0, aggregated_root.0].concat());
 
@@ -153,12 +145,12 @@ impl BatchInfo {
             chain_id,
             operator_da_input: da_fields.operator_da_input,
         };
-        Ok(Self {
+        Self {
             commit_info,
             chain_address,
             upgrade_tx_hash,
             blob_sidecar: da_fields.blob_sidecar,
-        })
+        }
     }
 
     /// Calculate keccak256 hash of BatchOutput part of public input
@@ -234,34 +226,6 @@ impl BatchInfo {
             commitment,
             last_block_timestamp: commit_info.last_block_timestamp,
         }
-    }
-
-    pub fn read_aggregated_root(mut state: impl ReadStorage) -> B256 {
-        const L2_MESSAGE_ROOT_ADDRESS: Address =
-            address!("0x0000000000000000000000000000000000010005");
-        const AGG_TREE_HEIGHT_KEY: B256 = B256::with_last_byte(0x04);
-        const AGG_TREE_NODES_KEY: B256 = B256::with_last_byte(0x06);
-
-        let agg_tree_height = {
-            let flat_key = derive_flat_storage_key(
-                &B160::from_be_bytes(L2_MESSAGE_ROOT_ADDRESS.into_array()),
-                &AGG_TREE_HEIGHT_KEY.0.into(),
-            );
-            state
-                .read(flat_key.as_u8_array().into())
-                .unwrap_or_default()
-        };
-
-        // `nodes[height][0]`
-        let agg_tree_root_hash_key =
-            n_dim_array_key_in_layout(AGG_TREE_NODES_KEY, &[agg_tree_height, B256::ZERO]);
-        let flat_key = derive_flat_storage_key(
-            &B160::from_be_bytes(L2_MESSAGE_ROOT_ADDRESS.into_array()),
-            &agg_tree_root_hash_key.0.into(),
-        );
-        state
-            .read(flat_key.as_u8_array().into())
-            .unwrap_or_default()
     }
 }
 
@@ -348,34 +312,32 @@ fn calculate_da_fields(
     }
 }
 
-fn n_dim_array_key_in_layout(array_key: B256, indices: &[B256]) -> B256 {
-    let mut key = array_key;
-
-    for index in indices {
-        let hashed = U256::from_be_bytes(keccak256(key.0).0);
-        let index_u256 = U256::from_be_bytes(index.0);
-        key = B256::from(hashed.overflowing_add(index_u256).0);
-    }
-
-    key
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiscoveredCommittedBatch {
+    /// Information about committed batch as was discovered on-chain.
+    pub batch_info: StoredBatchInfo,
+    /// Range of L2 blocks that belong to this batch.
+    pub block_range: ops::RangeInclusive<BlockNumber>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy::primitives::b256;
+impl DiscoveredCommittedBatch {
+    pub fn number(&self) -> u64 {
+        self.batch_info.batch_number
+    }
 
-    #[test]
-    fn test_calculate_multichain_root_slot_tree_height_4() {
-        const AGG_TREE_NODES_KEY: B256 = B256::with_last_byte(0x06);
+    pub fn hash(&self) -> B256 {
+        self.batch_info.hash()
+    }
 
-        let agg_tree_height = B256::with_last_byte(0x4);
-        let agg_tree_root_hash_key =
-            n_dim_array_key_in_layout(AGG_TREE_NODES_KEY, &[agg_tree_height, B256::ZERO]);
+    pub fn first_block_number(&self) -> BlockNumber {
+        *self.block_range.start()
+    }
 
-        assert_eq!(
-            agg_tree_root_hash_key,
-            b256!("0x35817d789b7a6dbe8b95b0f21e189fb26d3d329de699cac7a267a9568298e0a5")
-        );
+    pub fn last_block_number(&self) -> BlockNumber {
+        *self.block_range.end()
+    }
+
+    pub fn block_count(&self) -> u64 {
+        self.block_range.end() - self.block_range.start() + 1
     }
 }

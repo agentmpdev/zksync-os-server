@@ -4,9 +4,10 @@ use tokio::sync::mpsc;
 use zksync_os_l1_sender::batcher_model::{FriProof, SignedBatchEnvelope};
 use zksync_os_l1_sender::commands::L1SenderCommand;
 use zksync_os_l1_sender::commands::execute::ExecuteCommand;
+use zksync_os_l1_watcher::CommittedBatchProvider;
 use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
 use zksync_os_priority_tree::PriorityTreeManager;
-use zksync_os_storage_api::{ReadBatch, ReadFinality, ReadReplay};
+use zksync_os_storage_api::{ReadFinality, ReadReplay};
 
 /// Pipeline step for the Priority Tree manager.
 ///
@@ -18,30 +19,26 @@ use zksync_os_storage_api::{ReadBatch, ReadFinality, ReadReplay};
 /// Internally manages:
 /// - `prepare_execute_commands` task: processes proven batches and generates execute commands
 /// - `keep_caching` task: persists priority tree for executed batches
-pub struct PriorityTreePipelineStep<BlockStorage, Finality, BatchStorage> {
-    priority_tree_manager: PriorityTreeManager<BlockStorage, Finality, BatchStorage>,
+pub struct PriorityTreePipelineStep<BlockStorage, Finality> {
+    priority_tree_manager: PriorityTreeManager<BlockStorage, Finality>,
 }
 
-impl<BlockStorage, Finality, BatchStorage>
-    PriorityTreePipelineStep<BlockStorage, Finality, BatchStorage>
+impl<BlockStorage, Finality> PriorityTreePipelineStep<BlockStorage, Finality>
 where
-    BlockStorage: ReadReplay + Clone + Send + Sync + 'static,
-    Finality: ReadFinality + Clone + Send + 'static,
-    BatchStorage: ReadBatch + Clone + Send + Sync + 'static,
+    BlockStorage: ReadReplay + Clone,
+    Finality: ReadFinality + Clone,
 {
     pub async fn new(
         block_storage: BlockStorage,
         db_path: &Path,
-        batch_storage: BatchStorage,
         finality: Finality,
+        committed_batch_provider: CommittedBatchProvider,
     ) -> anyhow::Result<Self> {
-        let finality_status = finality.get_finality_status();
         let priority_tree_manager = PriorityTreeManager::new(
             block_storage,
             db_path,
             finality.clone(),
-            batch_storage,
-            finality_status.last_executed_batch,
+            committed_batch_provider,
         )
         .await?;
 
@@ -52,12 +49,10 @@ where
 }
 
 #[async_trait]
-impl<BlockStorage, Finality, BatchStorage> PipelineComponent
-    for PriorityTreePipelineStep<BlockStorage, Finality, BatchStorage>
+impl<BlockStorage, Finality> PipelineComponent for PriorityTreePipelineStep<BlockStorage, Finality>
 where
-    BlockStorage: ReadReplay + Clone + Send + Sync + 'static,
-    Finality: ReadFinality + Clone + Send + 'static,
-    BatchStorage: ReadBatch + Clone + Send + Sync + 'static,
+    BlockStorage: ReadReplay + Clone,
+    Finality: ReadFinality + Clone,
 {
     type Input = SignedBatchEnvelope<FriProof>;
     type Output = L1SenderCommand<ExecuteCommand>;

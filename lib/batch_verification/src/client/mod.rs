@@ -27,7 +27,7 @@ use zksync_os_observability::ComponentStateReporter;
 use zksync_os_observability::GenericComponentState;
 use zksync_os_observability::StateLabel;
 use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
-use zksync_os_storage_api::ReplayRecord;
+use zksync_os_storage_api::{read_aggregated_root, ReplayRecord, StateError};
 use zksync_os_storage_api::{ReadFinality, ReadStateHistory};
 
 mod block_cache;
@@ -54,8 +54,8 @@ enum BatchVerificationError {
     TreeError,
     #[error("Batch data mismatch: {0}")]
     BatchDataMismatch(String),
-    #[error("Failed to create batch info: {0}")]
-    BatchInfo(anyhow::Error),
+    #[error("State error: {0}")]
+    State(#[from] StateError),
 }
 
 type VerificationInput = (BlockOutput, ReplayRecord, BlockMerkleTreeData);
@@ -218,6 +218,10 @@ impl<Finality: ReadFinality, ReadState: ReadStateHistory>
                 })
                 .collect::<Result<Vec<_>, BatchVerificationError>>()?;
 
+        let state_view = self.read_state
+            .state_view_at(request.last_block_number)?;
+        let aggregated_root = read_aggregated_root(state_view);
+
         let batch_info = BatchInfo::new(
             blocks
                 .iter()
@@ -234,9 +238,8 @@ impl<Finality: ReadFinality, ReadState: ReadStateHistory>
             self.diamond_proxy_sl,
             request.batch_number,
             request.pubdata_mode,
-            &self.read_state,
-        )
-        .map_err(BatchVerificationError::BatchInfo)?;
+            aggregated_root,
+        );
 
         if batch_info.commit_info != request.commit_data {
             let diff = request.commit_data.diff(&batch_info.commit_info);

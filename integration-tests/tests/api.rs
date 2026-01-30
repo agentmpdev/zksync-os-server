@@ -1,6 +1,6 @@
 use alloy::eips::Encodable2718;
 use alloy::network::{ReceiptResponse, TransactionBuilder, TxSigner};
-use alloy::primitives::{TxHash, U256, address, bytes};
+use alloy::primitives::{TxHash, U128, U256, address};
 use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use regex::Regex;
@@ -8,6 +8,7 @@ use std::time::Duration;
 use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::contracts::EventEmitter;
+use zksync_os_server::config::FeeConfig;
 
 #[test_log::test(tokio::test)]
 async fn get_code() -> anyhow::Result<()> {
@@ -197,16 +198,38 @@ async fn send_raw_transaction_sync_timeout() -> anyhow::Result<()> {
 }
 
 #[test_log::test(tokio::test)]
-async fn estimate_gas_without_balance() -> anyhow::Result<()> {
-    // Test that the node can estimate transaction's gas even if sender does not have enough balance.
-    let tester = Tester::setup().await?;
-    let _estimated_gas = tester
-        .l2_provider
-        .estimate_gas(
-            TransactionRequest::default()
-                .to(address!("0x6e3338eB78A71C5FfF5Cd2673f9C63b7229fAa0b"))
-                .input(bytes!("0x38711eC715A5A32180427792Dc0e97f8E3303071").into()),
-        )
+async fn estimate_gas_with_high_prices() -> anyhow::Result<()> {
+    // Tests the estimations are accurate with high fee overrides.
+    // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
+    let fee_config = FeeConfig {
+        native_price_usd: 3e-9, // doesn't matter
+        pubdata_price_override: Some(U128::from(10_000_000_000_000u64)),
+        native_price_override: Some(U128::from(1_000_000u64)),
+        base_fee_override: Some(U128::from(100_000_000u64)),
+        native_per_gas: 100, // doesn't matter
+        pubdata_price_cap: None,
+    };
+    let tester = Tester::builder()
+        .fee_config(fee_config)
+        .estimate_gas_pubdata_price_factor(1.0)
+        .build()
         .await?;
+
+    // Random address.
+    let to = address!("0xa5d85D1D865F89a23A95d4F5F74850f289Dbc5f9");
+    // Create a transaction
+    let tx = TransactionRequest::default().to(to).value(U256::ONE);
+
+    let gas = tester.l2_provider.estimate_gas(tx.clone()).await?;
+    tracing::info!("Estimated gas: {gas}");
+
+    let receipt = tester
+        .l2_provider
+        .send_transaction(tx)
+        .await?
+        .expect_successful_receipt()
+        .await?;
+    tracing::info!("Got receipt, gas used: {}", receipt.gas_used);
+
     Ok(())
 }
