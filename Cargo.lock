@@ -15448,6 +15448,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-transaction-pool",
  "tokio",
+ "tokio-stream",
  "tracing",
  "vise",
  "zksync_os_reth_compat",

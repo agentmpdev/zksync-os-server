@@ -1,13 +1,19 @@
 use std::{
     collections::VecDeque,
+    pin::Pin,
     sync::{Arc, RwLock},
+    task::{Context, Poll},
 };
 
-//use tokio::sync::;
-use std::time::Instant;
-use tokio::sync::broadcast::{self, error::TryRecvError};
+use futures::{Stream, StreamExt};
+use tokio::time::Instant;
+use tokio::{
+    sync::broadcast::{self},
+    time::{Sleep, sleep_until},
+};
+use tokio_stream::wrappers::BroadcastStream;
 use zksync_os_types::{
-    IndexedInteropRoot, IndexedInteropRootsEnvelope, InteropRootsEnvelope, InteropRootsLogIndex,
+    IndexedInteropRoot, InteropRoot, InteropRootsEnvelope, InteropRootsLogIndex,
 };
 
 #[derive(Clone)]
@@ -49,45 +55,45 @@ impl InteropTxPool {
 
 #[derive(Clone)]
 struct InteropTxPoolInner {
-    sender: broadcast::Sender<IndexedInteropRoot>,
+    sender: broadcast::Sender<InteropRoot>,
     pending_roots: VecDeque<IndexedInteropRoot>,
-    sent_roots: VecDeque<IndexedInteropRoot>,
 }
 
 pub struct InteropTransactions {
-    receiver: broadcast::Receiver<IndexedInteropRoot>,
-    pending_roots: VecDeque<IndexedInteropRoot>,
+    receiver: BroadcastStream<InteropRoot>,
+    pending_roots: VecDeque<InteropRoot>,
     interop_roots_per_tx: usize,
-    next_tx_allowed_after: Instant,
+    sleep: Option<Pin<Box<Sleep>>>,
 }
 
-impl Iterator for InteropTransactions {
-    type Item = IndexedInteropRootsEnvelope;
+impl Stream for InteropTransactions {
+    type Item = InteropRootsEnvelope;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if Instant::now() < self.next_tx_allowed_after {
-            return None;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(sleep) = self.sleep.as_mut() {
+            if sleep.as_mut().poll(cx).is_pending() {
+                return Poll::Pending;
+            }
+            self.sleep = None;
         }
 
         loop {
             if let Some(envelope) = self.take_tx(false) {
-                return Some(envelope);
+                return Poll::Ready(Some(envelope));
             }
 
-            match self.receiver.try_recv() {
-                Ok(root) => {
+            match self.receiver.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(root))) => {
                     self.pending_roots.push_front(root);
                     continue;
                 }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Lagged(_)) => {
-                    if let Some(envelope) = self.take_tx(true) {
-                        return Some(envelope);
+                Poll::Pending => {
+                    if let Some(tx) = self.take_tx(true) {
+                        return Poll::Ready(Some(tx));
                     }
-                    return None;
+                    return Poll::Pending;
                 }
-                Err(TryRecvError::Closed) => {
-                    return None;
-                }
+                Poll::Ready(_) => return Poll::Ready(None),
             }
         }
     }
@@ -95,7 +101,7 @@ impl Iterator for InteropTransactions {
 
 impl InteropTransactions {
     /// Take a transaction from pending roots(not depending on the amount)
-    fn take_tx(&mut self, allowed_to_take_remainder: bool) -> Option<IndexedInteropRootsEnvelope> {
+    fn take_tx(&mut self, allowed_to_take_remainder: bool) -> Option<InteropRootsEnvelope> {
         if self.pending_roots.is_empty()
             || (self.pending_roots.len() < self.interop_roots_per_tx && !allowed_to_take_remainder)
         {
@@ -110,14 +116,7 @@ impl InteropTransactions {
                 .rev() // reversing iterator as last element is the one received earliest
                 .collect::<Vec<_>>();
 
-            let tx = IndexedInteropRootsEnvelope {
-                log_index: roots_to_consume.last().unwrap().log_index.clone(),
-                envelope: InteropRootsEnvelope::from_interop_roots(
-                    roots_to_consume.iter().map(|r| r.root.clone()).collect(),
-                ),
-            };
-
-            Some(tx)
+            Some(InteropRootsEnvelope::from_interop_roots(roots_to_consume))
         }
     }
 }
@@ -127,7 +126,6 @@ impl InteropTxPoolInner {
         Self {
             sender: broadcast::Sender::new(buffer_size),
             pending_roots: VecDeque::new(),
-            sent_roots: VecDeque::new(),
         }
     }
 
@@ -137,32 +135,20 @@ impl InteropTxPoolInner {
         next_tx_allowed_after: Instant,
     ) -> InteropTransactions {
         InteropTransactions {
-            receiver: self.sender.subscribe(),
-            pending_roots: self.pending_roots.clone(),
+            receiver: BroadcastStream::new(self.sender.subscribe()),
+            pending_roots: self.pending_roots.iter().map(|r| r.root.clone()).collect(),
             interop_roots_per_tx,
-            next_tx_allowed_after,
+            sleep: Some(Box::pin(sleep_until(next_tx_allowed_after))),
         }
     }
 
     pub fn add_root(&mut self, root: IndexedInteropRoot) {
         if self.sender.receiver_count() > 0 {
-            self.sender.send(root.clone()).expect("Failed to send root");
-            self.sent_roots.push_front(root);
-        } else {
-            self.pending_roots.push_front(root);
+            self.sender
+                .send(root.root.clone())
+                .expect("Failed to send root");
         }
-    }
-
-    /// Take next root in the following order:
-    /// - used roots
-    /// - pending roots
-    /// - receiver
-    fn take_next_root(&mut self) -> Option<IndexedInteropRoot> {
-        if let Some(root) = self.sent_roots.pop_back() {
-            Some(root)
-        } else {
-            self.pending_roots.pop_back()
-        }
+        self.pending_roots.push_front(root);
     }
 
     /// Cleans up the stream and removes all roots that were sent in transactions
@@ -180,7 +166,7 @@ impl InteropTxPoolInner {
         for tx in txs {
             let mut roots = Vec::new();
             for _ in 0..tx.interop_roots_count() {
-                roots.push(self.take_next_root().unwrap());
+                roots.push(self.pending_roots.pop_back().unwrap());
             }
 
             let envelope = InteropRootsEnvelope::from_interop_roots(
@@ -190,8 +176,6 @@ impl InteropTxPoolInner {
 
             assert_eq!(&envelope, &tx);
         }
-
-        self.pending_roots.extend(self.sent_roots.drain(..));
 
         Some(log_index)
     }

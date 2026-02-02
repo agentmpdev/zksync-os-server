@@ -8,8 +8,11 @@ use alloy::primitives::{Address, BlockHash, TxHash, U256};
 use anyhow::Context as _;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::SealedBlock;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{mpsc, watch};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::{
+    sync::{mpsc, watch},
+    time::Instant,
+};
 use zksync_os_interface::types::{BlockContext, BlockHashes, BlockOutput};
 use zksync_os_mempool::{
     CanonicalStateUpdate, InteropTxPool, L2TransactionPool, PoolUpdateKind, ReplayTxStream,

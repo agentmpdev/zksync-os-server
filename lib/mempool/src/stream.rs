@@ -81,10 +81,11 @@ impl Stream for BestTransactionsStream<'_> {
             }
 
             if !this.txs_already_provided || this.provide_only_interop_txs {
-                if let Some(tx) = this.interop_transactions.next() {
-                    return Poll::Ready(Some(tx.envelope.into()));
+                match this.interop_transactions.poll_next_unpin(cx) {
+                    Poll::Ready(Some(tx)) => return Poll::Ready(Some(tx.into())),
+                    Poll::Pending => {}
+                    Poll::Ready(None) => return Poll::Ready(None),
                 }
-                return Poll::Pending;
             }
 
             match this.l1_transactions.poll_recv(cx) {
