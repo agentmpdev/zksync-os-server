@@ -456,20 +456,20 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         genesis.genesis_upgrade_tx().await.protocol_version
     };
 
-    if current_protocol_version >= ProtocolSemanticVersion::new(0, 31, 0) {
-        tasks.spawn(
-            InteropWatcher::create_watcher(
-                node_startup_state.l1_state.bridgehub_l1.clone(), // todo
-                config.l1_watcher_config.clone().into(),
-                interop_transactions_sender,
-                next_interop_event_index.clone(),
-            )
-            .await
-            .expect("failed to start L1 interop roots watcher")
-            .run()
-            .map(report_exit("L1 interop roots watcher")),
-        );
-    }
+    // if current_protocol_version >= ProtocolSemanticVersion::new(0, 31, 0) {
+    //     tasks.spawn(
+    //         InteropWatcher::create_watcher(
+    //             node_startup_state.l1_state.bridgehub_l1.clone(), // todo
+    //             config.l1_watcher_config.clone().into(),
+    //             interop_transactions_sender,
+    //             next_interop_event_index.clone(),
+    //         )
+    //         .await
+    //         .expect("failed to start L1 interop roots watcher")
+    //         .run()
+    //         .map(report_exit("L1 interop roots watcher")),
+    //     );
+    // }
 
     tasks.spawn(
         L1TxWatcher::create_watcher(
