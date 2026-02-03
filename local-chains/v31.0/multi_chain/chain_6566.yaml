@@ -7,6 +7,7 @@ genesis:
   genesis_input_path: ./local-chains/v31.0/genesis.json
   chain_id: 6566
 l1_sender:
+  pubdata_mode: RelayedL2Calldata
   operator_commit_sk: '0x43f29e0bc258cf9c4b6e1ffb3a671821cc0305c063da6fa4f96802775d70522e'
   operator_prove_sk: '0x6ffabd7a2116ced068459b47bfadf4c6e94d1cdbd814be1983fc38bf12ac965d'
   operator_execute_sk: '0x6eadfcfc85ea637c8c646d5b6d99d1b00c21dfb339599c51245d84249b97010e'
