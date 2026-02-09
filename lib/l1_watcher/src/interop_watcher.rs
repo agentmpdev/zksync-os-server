@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use alloy::primitives::ruint::FromUintError;
-use alloy::rpc::types::Log;
+use alloy::rpc::types::{Log, Topic, ValueOrArray};
+use alloy::sol_types::SolEvent;
 use alloy::{primitives::Address, providers::DynProvider};
 use zksync_os_contract_interface::IMessageRoot::NewInteropRoot;
 use zksync_os_contract_interface::{Bridgehub, InteropRoot};
@@ -8,7 +11,7 @@ use zksync_os_types::IndexedInteropRoot;
 
 use crate::util::find_l1_block_by_interop_root_id;
 use crate::watcher::{L1Watcher, L1WatcherError};
-use crate::{L1WatcherConfig, ProcessL1Event};
+use crate::{L1WatcherConfig, ProcessRawEvents};
 
 pub struct InteropWatcher {
     contract_address: Address,
@@ -45,45 +48,63 @@ impl InteropWatcher {
             next_l1_block,
             config.max_blocks_to_process,
             config.poll_interval,
-            this.into(),
+            Box::new(this),
         ))
     }
 }
 
 #[async_trait::async_trait]
-impl ProcessL1Event for InteropWatcher {
-    const NAME: &'static str = "interop_root";
-
-    type SolEvent = NewInteropRoot;
-    type WatchedEvent = NewInteropRoot;
-
-    fn contract_address(&self) -> Address {
-        self.contract_address
+impl ProcessRawEvents for InteropWatcher {
+    fn name(&self) -> &'static str {
+        "interop_root"
     }
 
-    async fn process_event(&mut self, tx: NewInteropRoot, _log: Log) -> Result<(), L1WatcherError> {
-        if tx.logId < self.starting_interop_root_id {
+    fn event_signatures(&self) -> Topic {
+        NewInteropRoot::SIGNATURE_HASH.into()
+    }
+
+    fn contract_addresses(&self) -> ValueOrArray<Address> {
+        self.contract_address.into()
+    }
+
+    fn filter_events(&self, logs: Vec<Log>) -> Vec<Log> {
+        // we want to accept only the latest event for each log id
+        let mut indexes = HashMap::new();
+
+        for log in logs {
+            let sol_event = NewInteropRoot::decode_log(&log.inner)
+                .expect("failed to decode log")
+                .data;
+            indexes.insert(sol_event.logId, log);
+        }
+
+        return indexes.values().cloned().collect();
+    }
+
+    async fn process_raw_event(&mut self, log: Log) -> Result<(), L1WatcherError> {
+        let event = NewInteropRoot::decode_log(&log.inner)?.data;
+
+        if event.logId < self.starting_interop_root_id {
             tracing::debug!(
-                log_id = ?tx.logId,
+                log_id = ?event.logId,
                 starting_interop_root_id = self.starting_interop_root_id,
                 "skipping interop root event before starting index",
             );
             return Ok(());
         }
         let interop_root = InteropRoot {
-            chainId: tx.chainId,
-            blockOrBatchNumber: tx.blockNumber,
-            sides: tx.sides.clone(),
+            chainId: event.chainId,
+            blockOrBatchNumber: event.blockNumber,
+            sides: event.sides.clone(),
         };
 
         self.tx_pool.add_root(IndexedInteropRoot {
-            log_id: tx
+            log_id: event
                 .logId
                 .try_into()
                 .map_err(|e: FromUintError<u64>| L1WatcherError::Other(e.into()))?,
             root: interop_root,
         });
-
         Ok(())
     }
 }
