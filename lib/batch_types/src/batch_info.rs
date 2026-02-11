@@ -1,8 +1,8 @@
 use alloy::consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
-use alloy::primitives::{Address, B256, U256, keccak256};
+use alloy::primitives::{Address, B256, BlockNumber, U256, keccak256};
 use blake2::{Blake2s256, Digest};
-use ruint::aliases::B160;
 use serde::{Deserialize, Serialize};
+use std::ops;
 use std::ops::{Deref, DerefMut};
 use zksync_os_contract_interface::models::{CommitBatchInfo, StoredBatchInfo};
 use zksync_os_interface::types::{BlockContext, BlockOutput};
@@ -55,7 +55,7 @@ impl BatchInfo {
 
             for tx in transactions {
                 match tx.envelope() {
-                    ZkEnvelope::InteropRoots(_) => {}
+                    ZkEnvelope::System(_) => {}
                     ZkEnvelope::L1(l1_tx) => {
                         let onchain_data_hash = l1_tx.hash();
                         priority_operations_hash =
@@ -154,31 +154,6 @@ impl BatchInfo {
     pub fn public_input_hash(&self, protocol_version: &ProtocolSemanticVersion) -> B256 {
         let commit_info = &self.commit_info;
         match protocol_version.minor {
-            29 => {
-                use zk_ee_0_1_0::utils::Bytes32;
-                let system_batch_output =
-                    zk_os_basic_system_0_1_0::system_implementation::system::BatchOutput {
-                        chain_id: U256::from(commit_info.chain_id),
-                        first_block_timestamp: commit_info.first_block_timestamp,
-                        last_block_timestamp: commit_info.last_block_timestamp,
-                        // we always set it to zero
-                        used_l2_da_validator_address: B160::ZERO,
-                        pubdata_commitment: Bytes32::from(commit_info.da_commitment.0),
-                        number_of_layer_1_txs: U256::from(commit_info.number_of_layer1_txs),
-                        priority_operations_hash: Bytes32::from(
-                            commit_info.priority_operations_hash.0,
-                        ),
-                        l2_logs_tree_root: Bytes32::from(commit_info.l2_to_l1_logs_root_hash.0),
-                        upgrade_tx_hash: self
-                            .upgrade_tx_hash
-                            .map(|h| Bytes32::from_array(h.0))
-                            .unwrap_or(Bytes32::ZERO),
-                        interop_root_rolling_hash: Bytes32::from(
-                            commit_info.dependency_roots_rolling_hash.0,
-                        ),
-                    };
-                B256::from(system_batch_output.hash())
-            }
             // 31 needed for upgrade integration test
             30..=31 => {
                 use zk_ee::utils::Bytes32;
@@ -305,5 +280,35 @@ fn calculate_da_fields(
         da_commitment,
         operator_da_input,
         blob_sidecar,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiscoveredCommittedBatch {
+    /// Information about committed batch as was discovered on-chain.
+    pub batch_info: StoredBatchInfo,
+    /// Range of L2 blocks that belong to this batch.
+    pub block_range: ops::RangeInclusive<BlockNumber>,
+}
+
+impl DiscoveredCommittedBatch {
+    pub fn number(&self) -> u64 {
+        self.batch_info.batch_number
+    }
+
+    pub fn hash(&self) -> B256 {
+        self.batch_info.hash()
+    }
+
+    pub fn first_block_number(&self) -> BlockNumber {
+        *self.block_range.start()
+    }
+
+    pub fn last_block_number(&self) -> BlockNumber {
+        *self.block_range.end()
+    }
+
+    pub fn block_count(&self) -> u64 {
+        self.block_range.end() - self.block_range.start() + 1
     }
 }

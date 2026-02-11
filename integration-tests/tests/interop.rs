@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use test_log::test;
 use zksync_os_contract_interface::Bridgehub;
 use zksync_os_contract_interface::IMailbox::NewPriorityRequest;
+use zksync_os_integration_tests::assert_traits::ProviderAssert;
 use zksync_os_integration_tests::{
     MultiChainTester, Tester, assert_traits::ReceiptAssert, contracts::TestERC20,
     provider::ZksyncApi,
@@ -74,12 +75,6 @@ sol! {
             bytes calldata _bundle,
             MessageInclusionProof calldata _proof
         ) external;
-    }
-
-    #[sol(rpc)]
-    contract IL2InteropRootStorage {
-        function interopRoots(uint256 chainId, uint256 batchNumber) external view returns (bytes32);
-        function addInteropRoot(uint256 chainId, uint256 batchNumber, bytes32[] memory sides) external;
     }
 
     // Bundle attribute functions for encoding
@@ -180,17 +175,25 @@ async fn setup_token_on_chain_a(
 )> {
     // Deploy ERC20 token
     let initial_supply = U256::from(1_000_000) * U256::from(10).pow(U256::from(18));
-    let token = TestERC20::deploy(
-        provider.clone(),
+    let token_address = TestERC20::deploy_builder(
+        provider,
         U256::ZERO,
         "Test Token".to_string(),
         "TEST".to_string(),
     )
+    // fixme: temporary measure while v31 zksync-os does not support estimation with gasPrice=0
+    .max_fee_per_gas(1_000_000_000)
+    .max_priority_fee_per_gas(0)
+    .deploy()
     .await?;
+    let token = TestERC20::new(token_address, provider.clone());
 
     // Mint tokens to sender
     token
         .mint(sender, initial_supply)
+        // fixme: temporary measure while v31 zksync-os does not support estimation with gasPrice=0
+        .max_fee_per_gas(1_000_000_000)
+        .max_priority_fee_per_gas(0)
         .send()
         .await?
         .expect_successful_receipt()
@@ -204,6 +207,9 @@ async fn setup_token_on_chain_a(
     let vault = IL2NativeTokenVault::new(L2_NATIVE_TOKEN_VAULT_ADDRESS, provider);
     vault
         .ensureTokenIsRegistered(*token.address())
+        // fixme: temporary measure while v31 zksync-os does not support estimation with gasPrice=0
+        .max_fee_per_gas(1_000_000_000)
+        .max_priority_fee_per_gas(0)
         .send()
         .await?
         .expect_successful_receipt()
@@ -261,13 +267,13 @@ async fn fund_wallet_via_l1_deposit(tester: &Tester, wallet: Address, amount: U2
 
     let bridgehub = Bridgehub::new(
         tester.l2_zk_provider.get_bridgehub_contract().await?,
-        tester.l1_provider.clone(),
+        tester.l1_provider().clone(),
         chain_id,
     );
 
-    let max_priority_fee_per_gas = tester.l1_provider.get_max_priority_fee_per_gas().await?;
+    let max_priority_fee_per_gas = tester.l1_provider().get_max_priority_fee_per_gas().await?;
     let base_l1_fees_data = tester
-        .l1_provider
+        .l1_provider()
         .estimate_eip1559_fees_with(Eip1559Estimator::new(|base_fee_per_gas, _| {
             Eip1559Estimation {
                 max_fee_per_gas: base_fee_per_gas * 3 / 2,
@@ -311,7 +317,7 @@ async fn fund_wallet_via_l1_deposit(tester: &Tester, wallet: Address, amount: U2
         .into_transaction_request();
 
     let l1_deposit_receipt = tester
-        .l1_provider
+        .l1_provider()
         .send_transaction(l1_deposit_request)
         .await?
         .expect_successful_receipt()
@@ -360,6 +366,9 @@ async fn test_interop_bundle_send() -> Result<()> {
 
     token
         .approve(L2_NATIVE_TOKEN_VAULT_ADDRESS, amount_to_send)
+        // fixme: temporary measure while v31 zksync-os does not support estimation with gasPrice=0
+        .max_fee_per_gas(1_000_000_000)
+        .max_priority_fee_per_gas(0)
         .send()
         .await?
         .expect_successful_receipt()
@@ -402,7 +411,7 @@ async fn test_interop_bundle_send() -> Result<()> {
     let destination_chain_id = format_evm_v1(chain_b_id);
 
     // Send sendBundle transaction
-    let pending_tx = interop_center
+    let receipt = interop_center
         .sendBundle(destination_chain_id.clone(), calls, bundle_attributes)
         .value(U256::ZERO)
         .gas(10_000_000)
@@ -410,14 +419,10 @@ async fn test_interop_bundle_send() -> Result<()> {
         .max_priority_fee_per_gas(0)
         .send()
         .await
-        .context("Failed to send bundle transaction")?;
-
-    let hash = *pending_tx.tx_hash();
-    let receipt = pending_tx.get_receipt().await?;
-
-    if !receipt.status() {
-        anyhow::bail!("Bundle transaction reverted on chain A");
-    }
+        .context("Failed to send bundle transaction")?
+        .expect_successful_receipt()
+        .await
+        .context("sendBundle on chain A")?;
 
     // Extract bundle data from the L1Messenger log (log #3)
     let l1_messenger_log = receipt.logs().get(3).expect("L1Messenger log not found");
@@ -432,7 +437,18 @@ async fn test_interop_bundle_send() -> Result<()> {
 
     // Get message proof
     let block_number = receipt.block_number.expect("Block number not found");
-    let log_proof = relayer_get_message_proof(&chain_a.l2_zk_provider, hash, block_number).await?;
+    let log_proof = relayer_get_message_proof(
+        &chain_a.l2_zk_provider,
+        receipt.transaction_hash,
+        block_number,
+    )
+    .await?;
+
+    // Wait for interop root to get included on chain B
+    chain_b
+        .l2_provider
+        .expect_interop_root_inclusion(chain_a_id, log_proof.batch_number)
+        .await?;
 
     // Build MessageInclusionProof
     let proof_data: Vec<FixedBytes<32>> = log_proof.proof.clone();
@@ -458,20 +474,14 @@ async fn test_interop_bundle_send() -> Result<()> {
         interop_handler.executeBundle(bundle.clone(), message_inclusion_proof.clone());
 
     // Send executeBundle with high gas limit
-    let pending_tx = execute_call
+    let _execute_receipt = execute_call
         .gas(50_000_000)
         .send()
         .await
-        .context("Failed to send executeBundle transaction")?;
-
-    let execute_receipt = pending_tx
-        .get_receipt()
+        .context("Failed to send executeBundle transaction")?
+        .expect_successful_receipt()
         .await
-        .context("Failed to get executeBundle receipt")?;
-
-    if !execute_receipt.status() {
-        anyhow::bail!("executeBundle transaction reverted on chain B");
-    }
+        .context("executeBundle on chain B")?;
 
     // Verify token balance on chain B
     let vault_b = IL2NativeTokenVault::new(L2_NATIVE_TOKEN_VAULT_ADDRESS, &chain_b.l2_provider);

@@ -48,6 +48,7 @@ l1:
   rollup_l1_da_validator_addr: 0x5be9468566a91e9979cc432a07998424b2f8c264
   blobs_zksync_os_l1_da_validator_addr: 0x4c89d69abcdef9fc6fc94ecb2ec666ec76bc4596
   avail_l1_da_validator_addr: 0x7ad5989a2689d5fbf7e5efa66d1367da262dda9c
+<<<<<<< HEAD
   no_da_validium_l1_validator_addr: 0xff8083491e750cef0ac550136c6c28edea430a33
 l2:
   testnet_paymaster_addr: '0x0000000000000000000000000000000000000000'
@@ -56,3 +57,13 @@ l2:
   consensus_registry: 0x971635b6abc5c3f53b268c98fb97e0cdc2fc7a4f
   multicall3: 0xe84a5eac22553ad4a145692ba255d8ee832639a1
   timestamp_asserter_addr: 0xc1c02be3e1d4b3ba8a9a4763541e3131ed16533d
+=======
+  no_da_validium_l1_validator_addr: 0x2875459a9697a646beb5676d95d10489424c8af3
+l2:
+  testnet_paymaster_addr: '0x0000000000000000000000000000000000000000'
+  default_l2_upgrader: 0x6b154ecf620b21269af2138e218ef8eb8fdfde72
+  l2_native_token_vault_proxy_addr: '0x0000000000000000000000000000000000010004'
+  consensus_registry: 0x89349d742cc8822f22266ca4818436b817324660
+  multicall3: 0x6c32c903a85bf4cf9a3b40e219530a361f2def70
+  timestamp_asserter_addr: 0xaa5ca53c959629046f216fa9f59f306aa1735de2
+>>>>>>> origin/main

@@ -1,6 +1,6 @@
 use alloy::eips::Encodable2718;
 use alloy::network::{ReceiptResponse, TransactionBuilder, TxSigner};
-use alloy::primitives::{TxHash, U256};
+use alloy::primitives::{TxHash, U128, U256, address};
 use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use regex::Regex;
@@ -8,6 +8,7 @@ use std::time::Duration;
 use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::contracts::EventEmitter;
+use zksync_os_server::config::FeeConfig;
 
 #[test_log::test(tokio::test)]
 async fn get_code() -> anyhow::Result<()> {
@@ -193,5 +194,66 @@ async fn send_raw_transaction_sync_timeout() -> anyhow::Result<()> {
             .contains("The transaction was added to the mempool but wasn't processed within")
     );
 
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn estimate_gas_with_high_prices() -> anyhow::Result<()> {
+    // Tests the estimations are accurate with high fee overrides.
+    // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
+    let fee_config = FeeConfig {
+        native_price_usd: 3e-9, // doesn't matter
+        pubdata_price_override: Some(U128::from(10_000_000_000_000u64)),
+        native_price_override: Some(U128::from(1_000_000u64)),
+        base_fee_override: Some(U128::from(100_000_000u64)),
+        native_per_gas: 100, // doesn't matter
+        pubdata_price_cap: None,
+    };
+    let tester = Tester::builder()
+        .fee_config(fee_config)
+        .estimate_gas_pubdata_price_factor(1.0)
+        .build()
+        .await?;
+
+    // Random address.
+    let to = address!("0xa5d85D1D865F89a23A95d4F5F74850f289Dbc5f9");
+    // Create a transaction
+    let tx = TransactionRequest::default().to(to).value(U256::ONE);
+
+    let gas = tester.l2_provider.estimate_gas(tx.clone()).await?;
+    tracing::info!("Estimated gas: {gas}");
+
+    let receipt = tester
+        .l2_provider
+        .send_transaction(tx)
+        .await?
+        .expect_successful_receipt()
+        .await?;
+    tracing::info!("Got receipt, gas used: {}", receipt.gas_used);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn estimate_gas_without_balance() -> anyhow::Result<()> {
+    // Test that the node can estimate transaction's gas even if sender does not have enough balance.
+    let tester = Tester::setup().await?;
+    let req = TransactionRequest::default()
+        .to(address!("0xF8fF3e62E94807a5C687f418Fe36942dD3a24525"))
+        .from(address!("0x38711eC715A5A32180427792Dc0e97f8E3303072"));
+    let txs_requests = [
+        // no gas price fields are specified
+        req.clone(),
+        // `gasPrice=0`
+        req.clone().gas_price(0),
+        // `maxPriorityFeePerGas=0`
+        req.clone().max_priority_fee_per_gas(0),
+        // `maxFeePerGas=0,maxPriorityFeePerGas=0`
+        req.clone().max_fee_per_gas(0).max_priority_fee_per_gas(0),
+    ];
+    for (i, tx_request) in txs_requests.into_iter().enumerate() {
+        let estimated_gas = tester.l2_provider.estimate_gas(tx_request).await?;
+        tracing::info!("Estimated gas for tx #{i}: {estimated_gas}");
+    }
     Ok(())
 }

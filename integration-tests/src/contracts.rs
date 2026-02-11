@@ -5,11 +5,11 @@ use crate::assert_traits::ReceiptAssert;
 use crate::network::Zksync;
 use crate::provider::ZksyncApi;
 use alloy::network::ReceiptResponse;
-use alloy::primitives::{Address, U256, address};
+use alloy::primitives::{Address, B256, U256, address};
 use alloy::providers::{PendingTransactionBuilder, Provider};
 use alloy::rpc::types::{Log, TransactionReceipt};
 use zksync_os_contract_interface::Bridgehub;
-use zksync_os_types::ZkReceiptEnvelope;
+use zksync_os_types::{L2_INTEROP_ROOT_STORAGE_ADDRESS, ZkReceiptEnvelope};
 
 alloy::sol!(
     /// Simple contract that can emit events on demand.
@@ -89,6 +89,11 @@ alloy::sol! {
     interface IL2AssetRouter {
         function l2TokenAddress(address _l1Token) public view returns (address);
         function withdraw(address _l1Receiver, address _l2Token, uint256 _amount);
+    }
+
+    #[sol(rpc)]
+    contract IL2InteropRootStorage {
+        function interopRoots(uint256 chainId, uint256 batchNumber) external view returns (bytes32);
     }
 }
 
@@ -213,6 +218,34 @@ impl<P1: Provider, P2: Provider<Zksync>> L1Nullifier<P1, P2> {
             .send()
             .await?
             .expect_successful_receipt()
+            .await
+    }
+}
+
+pub struct L2InteropRootStorage<P: Provider>(
+    IL2InteropRootStorage::IL2InteropRootStorageInstance<P>,
+);
+
+impl<P: Provider> L2InteropRootStorage<P> {
+    pub fn new(l2_provider: P) -> Self {
+        Self(IL2InteropRootStorage::new(
+            L2_INTEROP_ROOT_STORAGE_ADDRESS,
+            l2_provider,
+        ))
+    }
+
+    pub fn address(&self) -> &Address {
+        self.0.address()
+    }
+
+    pub async fn get_interop_root(
+        &self,
+        chain_id: u64,
+        batch_number: u64,
+    ) -> alloy::contract::Result<B256> {
+        self.0
+            .interopRoots(U256::from(chain_id), U256::from(batch_number))
+            .call()
             .await
     }
 }
