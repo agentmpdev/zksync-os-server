@@ -12,9 +12,7 @@ use tokio::{
     time::{Sleep, sleep_until},
 };
 use tokio_stream::wrappers::BroadcastStream;
-use zksync_os_types::{
-    IndexedInteropRoot, InteropRoot, InteropRootsLogIndex, SystemTxEnvelope, SystemTxType,
-};
+use zksync_os_types::{IndexedInteropRoot, InteropRootsLogIndex, SystemTxEnvelope, SystemTxType};
 
 #[derive(Clone)]
 pub struct InteropRootsTxPool {
@@ -55,13 +53,13 @@ impl InteropRootsTxPool {
 
 #[derive(Clone)]
 struct InteropRootsTxPoolInner {
-    sender: broadcast::Sender<InteropRoot>,
+    sender: broadcast::Sender<IndexedInteropRoot>,
     pending_roots: VecDeque<IndexedInteropRoot>,
 }
 
 pub struct InteropRootTransactions {
-    receiver: BroadcastStream<InteropRoot>,
-    pending_roots: VecDeque<InteropRoot>,
+    receiver: BroadcastStream<IndexedInteropRoot>,
+    pending_roots: VecDeque<IndexedInteropRoot>,
     interop_roots_per_tx: usize,
     sleep: Option<Pin<Box<Sleep>>>,
 }
@@ -114,7 +112,13 @@ impl InteropRootTransactions {
                 .rev() // reversing iterator as last element is the one received earliest
                 .collect::<Vec<_>>();
 
-            Some(SystemTxEnvelope::import_interop_roots(roots_to_consume))
+            Some(SystemTxEnvelope::import_interop_roots(
+                roots_to_consume
+                    .iter()
+                    .map(|r| r.root.clone())
+                    .collect::<Vec<_>>(),
+                roots_to_consume.last().unwrap().log_index.clone(),
+            ))
         }
     }
 }
@@ -134,14 +138,14 @@ impl InteropRootsTxPoolInner {
     ) -> InteropRootTransactions {
         InteropRootTransactions {
             receiver: BroadcastStream::new(self.sender.subscribe()),
-            pending_roots: self.pending_roots.iter().map(|r| r.root.clone()).collect(),
+            pending_roots: self.pending_roots.clone(),
             interop_roots_per_tx,
             sleep: Some(Box::pin(sleep_until(next_tx_allowed_after))),
         }
     }
 
     pub fn add_root(&mut self, root: IndexedInteropRoot) {
-        let _ = self.sender.send(root.root.clone());
+        let _ = self.sender.send(root.clone());
         self.pending_roots.push_front(root);
     }
 
@@ -172,6 +176,7 @@ impl InteropRootsTxPoolInner {
 
             let envelope = SystemTxEnvelope::import_interop_roots(
                 roots.iter().map(|r| r.root.clone()).collect(),
+                roots.last().unwrap().log_index.clone(),
             );
             log_index = roots.last().unwrap().log_index.clone();
 

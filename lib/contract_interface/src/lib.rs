@@ -45,8 +45,8 @@ alloy::sol! {
     }
 
     interface ServerNotifier {
-        event MigrateToGateway(uint256 indexed chainId);
-        event MigrateFromGateway(uint256 indexed chainId);
+        event MigrateToGateway(uint256 indexed chainId, uint256 indexed migrationNumber);
+        event MigrateFromGateway(uint256 indexed chainId, uint256 indexed migrationNumber);
     }
 
     interface ISystemContext {

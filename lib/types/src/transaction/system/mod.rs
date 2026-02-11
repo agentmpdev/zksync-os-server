@@ -37,22 +37,25 @@ impl PartialEq for SystemTxEnvelope {
 
 impl SystemTxEnvelope {
     /// A constructor for system transaction that imports interop roots
-    pub fn import_interop_roots(roots: Vec<InteropRoot>) -> Self {
-        Self::create_from_input(SystemTxInput::ImportInteropRoots(roots))
+    pub fn import_interop_roots(roots: Vec<InteropRoot>, index: InteropRootsLogIndex) -> Self {
+        // some super simple hash function to avoid collisions
+        // TODO: Use actual root index once it is implemented(GW contracts)
+        let salt = index
+            .block_number
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(index.index_in_block);
+        Self::create_from_input(SystemTxInput::ImportInteropRoots(roots), salt)
     }
 
     /// A constructor for system transaction that sets the settlement layer chain id
-    pub fn set_sl_chain_id(chain_id: ChainId) -> Self {
-        Self::create_from_input(SystemTxInput::SetSLChainId(chain_id))
+    pub fn set_sl_chain_id(chain_id: ChainId, index: u64) -> Self {
+        Self::create_from_input(SystemTxInput::SetSLChainId(chain_id), index)
     }
 
-    fn create_from_input(tx_input: SystemTxInput) -> Self {
+    fn create_from_input(tx_input: SystemTxInput, salt: u64) -> Self {
         let calldata = tx_input.abi_encode();
 
-        let transaction = SystemTx {
-            to: tx_input.to_address(),
-            input: Bytes::from(calldata),
-        };
+        let transaction = SystemTx::new(tx_input.to_address(), Bytes::from(calldata), salt);
 
         Self {
             hash: transaction.calculate_hash(),
@@ -317,17 +320,22 @@ mod tests {
     use alloy::primitives::{B256, Uint};
     use zksync_os_contract_interface::InteropRoot;
 
-    use crate::SystemTxEnvelope;
+    use crate::{InteropRootsLogIndex, SystemTxEnvelope};
 
     /// System transaction serialization should be consistent with Ethereum JSON-RPC spec
     /// See https://ethereum.github.io/execution-apis/api-documentation/
     #[test]
     fn interop_roots_tx_serialization() {
-        let tx = SystemTxEnvelope::import_interop_roots(vec![InteropRoot {
+        let root = InteropRoot {
             chainId: Uint::from(1),
             blockOrBatchNumber: Uint::from(1),
             sides: vec![B256::ZERO],
-        }]);
+        };
+        let log_index = InteropRootsLogIndex {
+            block_number: 1,
+            index_in_block: 0,
+        };
+        let tx = SystemTxEnvelope::import_interop_roots(vec![root], log_index);
 
         assert_eq!(
             serde_json::to_string_pretty(&tx).unwrap(),
@@ -351,7 +359,7 @@ mod tests {
 
     #[test]
     fn set_sl_chain_id_tx_serialization() {
-        let tx = SystemTxEnvelope::set_sl_chain_id(1);
+        let tx = SystemTxEnvelope::set_sl_chain_id(1, 0);
 
         assert_eq!(
             serde_json::to_string_pretty(&tx).unwrap(),

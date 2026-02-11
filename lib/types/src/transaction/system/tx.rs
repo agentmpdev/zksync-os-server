@@ -12,11 +12,16 @@ use crate::transaction::SYSTEM_TX_TYPE_ID;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemTx {
-    pub to: Address,
-    pub input: Bytes,
+    to: Address,
+    input: Bytes,
+    salt: u64,
 }
 
 impl SystemTx {
+    pub fn new(to: Address, input: Bytes, salt: u64) -> Self {
+        Self { to, input, salt }
+    }
+
     pub fn calculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
@@ -113,12 +118,13 @@ impl Encodable2718 for SystemTx {
 
 impl RlpEcdsaEncodableTx for SystemTx {
     fn rlp_encoded_fields_length(&self) -> usize {
-        self.to.length() + self.input.length()
+        self.to.length() + self.input.length() + self.salt.length()
     }
 
     fn rlp_encode_fields(&self, out: &mut dyn BufMut) {
         self.to.encode(out);
         self.input.encode(out);
+        self.salt.encode(out);
     }
 }
 
@@ -129,6 +135,7 @@ impl RlpEcdsaDecodableTx for SystemTx {
         Ok(Self {
             to: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
+            salt: Decodable::decode(buf)?,
         })
     }
 }

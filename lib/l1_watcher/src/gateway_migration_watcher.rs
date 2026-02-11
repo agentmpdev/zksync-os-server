@@ -5,7 +5,7 @@ use zksync_os_contract_interface::ServerNotifier::MigrateFromGateway;
 
 use crate::watcher::{L1Watcher, L1WatcherError};
 use crate::{L1WatcherConfig, ProcessL1Event};
-use alloy::primitives::{Address, ChainId};
+use alloy::primitives::Address;
 use alloy::providers::{DynProvider, Provider};
 use alloy::rpc::types::Log;
 use alloy::sol_types::SolEvent;
@@ -15,7 +15,7 @@ use zksync_os_types::SystemTxEnvelope;
 pub trait MigrationProcessor: Send + Sync + 'static {
     type Event: SolEvent + Send + Sync + 'static;
 
-    fn chain_id(event: Self::Event) -> ChainId;
+    fn into_system_tx_envelope(event: Self::Event) -> SystemTxEnvelope;
 }
 
 pub struct Gateway;
@@ -25,16 +25,22 @@ pub struct L1;
 impl MigrationProcessor for Gateway {
     type Event = MigrateFromGateway;
 
-    fn chain_id(event: Self::Event) -> ChainId {
-        event.chainId.try_into().unwrap()
+    fn into_system_tx_envelope(event: Self::Event) -> SystemTxEnvelope {
+        SystemTxEnvelope::set_sl_chain_id(
+            event.chainId.try_into().unwrap(),
+            event.migrationNumber.try_into().unwrap(),
+        )
     }
 }
 
 impl MigrationProcessor for L1 {
     type Event = MigrateToGateway;
 
-    fn chain_id(event: Self::Event) -> ChainId {
-        event.chainId.try_into().unwrap()
+    fn into_system_tx_envelope(event: Self::Event) -> SystemTxEnvelope {
+        SystemTxEnvelope::set_sl_chain_id(
+            event.chainId.try_into().unwrap(),
+            event.migrationNumber.try_into().unwrap(),
+        )
     }
 }
 
@@ -82,7 +88,7 @@ impl<T: MigrationProcessor> ProcessL1Event for GatewayMigrationWatcher<T> {
     }
 
     async fn process_event(&mut self, tx: T::Event, _log: Log) -> Result<(), L1WatcherError> {
-        let envelope = SystemTxEnvelope::set_sl_chain_id(T::chain_id(tx));
+        let envelope = T::into_system_tx_envelope(tx);
 
         self.output
             .send(envelope)
