@@ -89,7 +89,7 @@ impl NetworkService {
             .add_rlpx_sub_protocol(ZksProtocolHandler::<ZksProtocolV1, _> {
                 replay,
                 // we only want to request blocks if this is external node
-                to_request_blocks: node_role.is_external(),
+                node_role,
                 state: ProtocolState::new(protocol_tx, MAX_ACTIVE_CONNECTIONS),
                 replay_sender,
                 _phantom: Default::default(),
