@@ -13,7 +13,6 @@ use smart_config::{
 };
 use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
-use std::str::FromStr;
 use std::{path::PathBuf, time::Duration};
 use zksync_os_batch_verification;
 use zksync_os_l1_sender::commands::commit::CommitCommand;
@@ -236,29 +235,23 @@ pub struct NetworkConfig {
     /// Whether devp2p-based networking should be enabled.
     #[config(default_t = false)]
     pub enabled: bool,
-    /// The node's secret key, from which the node's identity is derived. Used during initial RLPx
-    /// handshake.
+    /// The node's secret key (256-bit ECDSA), from which the node's identity is derived. Used during
+    /// initial RLPx handshake.
     #[config(secret)]
-    #[config(
-        default_t = SecretKey::from_str("21b0ee131240821c39627c39d0fdde5edbda968c5877f5b63c5c542f267b5349").unwrap(),
-        with = Serde![str]
-    )]
-    pub secret_key: SecretKey,
+    #[config(default, with = Serde![str])]
+    pub secret_key: Option<SecretKey>,
     /// IPv4 address to use for Node Discovery Protocol v5 (discv5) and RLPx Transport Protocol (rlpx).
-    #[config(default_t = Ipv4Addr::LOCALHOST, with = Serde![str])]
+    #[config(default_t = Ipv4Addr::UNSPECIFIED, with = Serde![str])]
     pub address: Ipv4Addr,
     /// Port to use for Node Discovery Protocol v5 (discv5) and RLPx Transport Protocol (rlpx).
     #[config(default_t = 3060)]
     pub port: u16,
     /// All boot nodes to start network discovery with. Expected format is
-    /// `enode://<node ID>@<IP address>:<port>`.
-    // Default value corresponds to the default value of `secret_key` above. This is needed so local
-    // ENs can connect to local MN with zero configuration.
+    /// `enode://<node ID>@<IP address>:<port>` delimited by commas (`,`). For example:
+    /// `enode://dbd18888f17bad7df7fa958b57f4993f47312ba5364508fd0d9027e62ea17a037ca6985d6b0969c4341f1d4f8763a802785961989d07b1fb5373ced9d43969f6@127.0.0.1:3060`
     #[config(
-        default_t = vec![
-            NodeRecord::from_str("enode://dbd18888f17bad7df7fa958b57f4993f47312ba5364508fd0d9027e62ea17a037ca6985d6b0969c4341f1d4f8763a802785961989d07b1fb5373ced9d43969f6@127.0.0.1:3060").unwrap(),
-        ],
-        with = Delimited::repeat(Serde![str], ","),
+        default,
+        with = Delimited::repeat(Serde![str], ",")
     )]
     pub boot_nodes: Vec<NodeRecord>,
 }
@@ -939,7 +932,9 @@ pub struct FeeConfig {
 impl From<NetworkConfig> for zksync_os_network::config::NetworkConfig {
     fn from(value: NetworkConfig) -> Self {
         Self {
-            secret_key: value.secret_key,
+            secret_key: value
+                .secret_key
+                .expect("`network.secret_key` is required for running p2p networking stack"),
             address: value.address,
             port: value.port,
             boot_nodes: value.boot_nodes,

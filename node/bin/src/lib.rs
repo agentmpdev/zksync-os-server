@@ -277,7 +277,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     );
 
     if config.network_config.enabled {
-        tracing::info!("Initializing p2p networking");
+        tracing::info!("initializing p2p networking");
         // Channel between NetworkService and Sequencer (not actually used by sequencer for now)
         let (replay_sender, mut replays_for_sequencer) = tokio::sync::mpsc::unbounded_channel();
 
@@ -301,6 +301,10 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
                 );
             }
         });
+    } else {
+        tracing::info!(
+            "p2p networking is disabled; to enable set `network.enabled=true` and populate `network.secret_key`"
+        );
     }
 
     let (last_l1_committed_block, last_l1_proved_block, last_l1_executed_block) =
