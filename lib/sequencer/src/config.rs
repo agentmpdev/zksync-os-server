@@ -1,8 +1,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
+use zksync_os_types::NodeRole;
 
 #[derive(Clone, Debug)]
 pub struct SequencerConfig {
+    /// Node's role in the network.
+    pub node_role: NodeRole,
+
     /// Defines the block time for the sequencer.
     pub block_time: Duration,
 
@@ -31,14 +35,4 @@ pub struct SequencerConfig {
 
     /// Max number of interop roots to be included in a single transaction
     pub interop_roots_per_tx: usize,
-}
-
-impl SequencerConfig {
-    pub fn is_main_node(&self) -> bool {
-        self.block_replay_download_address.is_none()
-    }
-
-    pub fn is_external_node(&self) -> bool {
-        !self.is_main_node()
-    }
 }

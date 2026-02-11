@@ -114,14 +114,15 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 ) {
     let mut tasks: JoinSet<()> = JoinSet::new();
 
-    let role: &'static str = if config.sequencer_config.is_main_node() {
+    let node_role = config.general_config.node_role.clone();
+    let role: &'static str = if node_role.is_main() {
         "main_node"
     } else {
         "external_node"
     };
 
     // Priority tree is required for main node
-    if config.sequencer_config.is_main_node() && !config.general_config.run_priority_tree {
+    if node_role.is_main() && !config.general_config.run_priority_tree {
         panic!("`general_run_priority_tree` must be true for Main Node");
     }
 
@@ -138,7 +139,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     tracing::info!(version = NODE_VERSION, role, "Initializing Node");
 
     let (bridgehub_address, bytecode_supplier_address, chain_id, genesis_input_source) =
-        if config.sequencer_config.is_main_node() {
+        if node_role.is_main() {
             let genesis_input_source: Arc<dyn GenesisInputSource> =
                 Arc::new(FileGenesisInputSource::new(
                     config
@@ -189,7 +190,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     let l1_provider = build_node_l1_provider(&config.general_config.l1_rpc_url).await;
 
     tracing::info!("Reading L1 state");
-    let l1_state = if config.sequencer_config.is_main_node() {
+    let l1_state = if node_role.is_main() {
         // On the main node, we need to wait for the pending L1 transactions (commit/prove/execute) to be mined before proceeding.
         L1State::fetch_finalized(l1_provider.clone().erased(), bridgehub_address, chain_id)
             .await
@@ -283,7 +284,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 
         let network_service = NetworkService::new(
             config.network_config.clone().into(),
-            config.sequencer_config.node_role(),
+            node_role.clone(),
             block_replay_storage.clone(),
             zk_provider_factory,
             replay_sender,
@@ -311,7 +312,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         commit_proof_execute_block_numbers(&l1_state, &committed_batch_provider).await;
 
     let node_startup_state = NodeStateOnStartup {
-        is_main_node: config.sequencer_config.is_main_node(),
+        node_role: node_role.clone(),
         l1_state: l1_state.clone(),
         state_block_range_available: state.block_range_available(),
         block_replay_storage_last_block: block_replay_storage.latest_record(),
@@ -326,7 +327,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     };
 
     if let Some(block_rebuild) = &config.sequencer_config.block_rebuild
-        && config.sequencer_config.is_main_node()
+        && node_role.is_main()
     {
         // The assertion is only relevant for the main node.
         // External node can be started at any point and doesn't have to be in sync with L1.
@@ -531,7 +532,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     let (blob_fill_ratio_sender, blob_fill_ratio_receiver) = watch::channel(None);
     // Channel for Batcher->GasAdjuster communication. Batcher send sidecar to gas adjuster to estimate blob fill ratio.
     let (sidecar_sender, sidecar_receiver) = tokio::sync::mpsc::channel(10);
-    if config.sequencer_config.is_main_node() {
+    if node_role.is_main() {
         let gas_adjuster_config = gas_adjuster_config(
             config.gas_adjuster_config.clone(),
             config.l1_sender_config.pubdata_mode,
@@ -674,7 +675,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             .await;
     });
 
-    if config.sequencer_config.is_main_node() {
+    if node_role.is_main() {
         let mut base_token_price_updater = BaseTokenPriceUpdater::new(
             l1_state
                 .diamond_proxy
@@ -706,7 +707,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         });
     }
 
-    if config.sequencer_config.is_main_node() {
+    if node_role.is_main() {
         // Main Node
         run_main_node_pipeline(
             &config,
@@ -885,7 +886,7 @@ async fn run_main_node_pipeline(
             state: state.clone(),
             replay: block_replay_storage.clone(),
             repositories: repositories.clone(),
-            sequencer_config: config.sequencer_config.clone().into(),
+            config: config.into(),
             tx_acceptance_state_sender,
         })
         .pipe_opt(
@@ -1017,7 +1018,7 @@ async fn run_en_pipeline(
             state: state.clone(),
             replay: block_replay_storage.clone(),
             repositories: repositories.clone(),
-            sequencer_config: config.sequencer_config.clone().into(),
+            config: config.into(),
             tx_acceptance_state_sender,
         })
         .pipe_opt(

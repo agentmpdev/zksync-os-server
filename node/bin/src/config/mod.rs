@@ -171,6 +171,9 @@ fn log_all_errors(errors: ParseErrors) -> anyhow::Error {
 #[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
 #[config(derive(Default))]
 pub struct GeneralConfig {
+    #[config(default_t = NodeRole::MainNode, with = Serde![str])]
+    pub node_role: NodeRole,
+
     /// L1's JSON RPC API.
     #[config(default_t = "http://localhost:8545".into())]
     pub l1_rpc_url: String,
@@ -211,7 +214,7 @@ pub struct GeneralConfig {
     pub zkstack_cli_config_dir: Option<String>,
 
     /// **IMPORTANT: It must be set for an external node. However, setting this DOES NOT make the node into an external node.
-    /// `SequencerConfig::block_replay_download_address` is the source of truth for node type. **
+    /// [`GeneralConfig::role`] is the source of truth for node type. **
     #[config(default_t = None)]
     pub main_node_rpc_url: Option<String>,
 
@@ -390,20 +393,6 @@ pub struct SequencerConfig {
     #[config(default, with = Serde![*])]
     /// List of (block_number, db_key) pairs to override when downloading replay records.
     pub en_replay_record_overrides: Vec<(u64, Bytes)>,
-}
-
-impl SequencerConfig {
-    pub fn is_main_node(&self) -> bool {
-        self.block_replay_download_address.is_none()
-    }
-
-    pub fn node_role(&self) -> NodeRole {
-        if self.is_main_node() {
-            NodeRole::MainNode
-        } else {
-            NodeRole::ExternalNode
-        }
-    }
 }
 
 #[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
@@ -960,18 +949,19 @@ impl From<RpcConfig> for zksync_os_rpc::RpcConfig {
     }
 }
 
-impl From<SequencerConfig> for zksync_os_sequencer::config::SequencerConfig {
-    fn from(c: SequencerConfig) -> Self {
+impl From<&Config> for zksync_os_sequencer::config::SequencerConfig {
+    fn from(c: &Config) -> Self {
         Self {
-            block_time: c.block_time,
-            max_transactions_in_block: c.max_transactions_in_block,
-            block_dump_path: c.block_dump_path,
-            block_replay_server_address: c.block_replay_server_address,
-            block_replay_download_address: c.block_replay_download_address,
-            block_gas_limit: c.block_gas_limit,
-            block_pubdata_limit_bytes: c.block_pubdata_limit_bytes,
-            max_blocks_to_produce: c.max_blocks_to_produce,
-            interop_roots_per_tx: c.interop_roots_per_tx,
+            node_role: c.general_config.node_role.clone(),
+            block_time: c.sequencer_config.block_time,
+            max_transactions_in_block: c.sequencer_config.max_transactions_in_block,
+            block_dump_path: c.sequencer_config.block_dump_path.clone(),
+            block_replay_server_address: c.sequencer_config.block_replay_server_address.clone(),
+            block_replay_download_address: c.sequencer_config.block_replay_download_address.clone(),
+            block_gas_limit: c.sequencer_config.block_gas_limit,
+            block_pubdata_limit_bytes: c.sequencer_config.block_pubdata_limit_bytes,
+            max_blocks_to_produce: c.sequencer_config.max_blocks_to_produce,
+            interop_roots_per_tx: c.sequencer_config.interop_roots_per_tx,
         }
     }
 }
