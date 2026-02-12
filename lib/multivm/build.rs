@@ -37,9 +37,7 @@ fn main() {
                 return;
             }
         };
-
-        println!("tag: {tag}");
-
+        
         let dir = format!("{manifest_dir}/apps/{tag}");
         std::fs::create_dir_all(&dir).expect("failed to create directory");
         for variant in [
