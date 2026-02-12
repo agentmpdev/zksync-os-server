@@ -53,6 +53,13 @@ alloy::sol! {
         function setSettlementLayerChainId(uint256 _newSettlementLayerChainId);
     }
 
+    // `DynamicIncrementalMerkle.sol`
+    struct Bytes32PushTree {
+        uint256 _nextLeafIndex;
+        bytes32[] _sides;
+        bytes32[] _zeros;
+    }
+
     // `IMessageRoot.sol`
     #[sol(rpc)]
     interface IMessageRoot {
@@ -74,6 +81,15 @@ alloy::sol! {
         );
 
         function addInteropRootsInBatch(InteropRoot[] calldata interopRootsInput);
+
+        // mapping(uint256 chainId => Bytes32PushTree tree) public chainTree;
+        // For some reason macro translates mapping to a function that returns uint256 instead of Bytes32PushTree.
+        // TODO: Worth opening an issue in alloy-rs.
+        function chainTree(uint256 chainId) public view returns (Bytes32PushTree);
+
+        event AppendedChainBatchRoot(uint256 indexed chainId, uint256 indexed batchNumber, bytes32 chainBatchRoot);
+        function getMerklePathForChain(uint256 _chainId) external view returns (bytes32[] memory);
+        mapping(uint256 chainId => uint256 chainIndex) public chainIndex;
     }
 
     // `ZKChainStorage.sol`
