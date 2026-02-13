@@ -4,23 +4,18 @@ use alloy::primitives::{B256, BlockNumber, TxHash};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use zksync_os_batch_types::DiscoveredCommittedBatch;
-use zksync_os_l1_watcher::CommittedBatchProvider;
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
 use zksync_os_rpc_api::unstable::UnstableApiServer;
 use zksync_os_storage_api::RepositoryError;
 use zksync_os_types::L2_TO_L1_TREE_SIZE;
 
 pub struct UnstableNamespace<RpcStorage> {
-    committed_batch_provider: CommittedBatchProvider,
     storage: RpcStorage,
 }
 
 impl<RpcStorage> UnstableNamespace<RpcStorage> {
-    pub fn new(committed_batch_provider: CommittedBatchProvider, storage: RpcStorage) -> Self {
-        Self {
-            committed_batch_provider,
-            storage,
-        }
+    pub fn new(storage: RpcStorage) -> Self {
+        Self { storage }
     }
 }
 
@@ -29,35 +24,18 @@ impl<RpcStorage: ReadRpcStorage> UnstableNamespace<RpcStorage> {
         &self,
         block_number: u64,
     ) -> UnstableResult<DiscoveredCommittedBatch> {
-        // Try fetching from `CommittedBatchProvider` first. This should be enough to answer requests
-        // about recent blocks. Fallback to batch storage after which might not have the batch yet
-        // if node is still indexing historical batches.
-        let batch = match self
-            .committed_batch_provider
-            .get_by_block_number(block_number)
-        {
-            None => self
-                .storage
-                .batch()
-                .get_batch_by_block_number(block_number)?
-                .ok_or(UnstableError::BlockNotAvailableYet)?,
-            Some(batch) => batch,
-        };
-        Ok(batch)
+        self.storage
+            .batch()
+            .get_batch_by_block_number(block_number)?
+            .ok_or(UnstableError::BatchNotAvailableYet)
     }
 
     fn get_local_root_impl(&self, batch_number: u64) -> UnstableResult<B256> {
-        // Try fetching from `CommittedBatchProvider` first. This should be enough to answer requests
-        // about recent blocks. Fallback to batch storage after which might not have the batch yet
-        // if node is still indexing historical batches.
-        let batch = match self.committed_batch_provider.get(batch_number) {
-            None => self
-                .storage
-                .batch()
-                .get_batch_by_number(batch_number)?
-                .ok_or(UnstableError::BlockNotAvailableYet)?,
-            Some(batch) => batch,
-        };
+        let batch = self
+            .storage
+            .batch()
+            .get_batch_by_number(batch_number)?
+            .ok_or(UnstableError::BatchNotAvailableYet)?;
 
         let mut merkle_tree_leaves = vec![];
         for block in batch.block_range.clone() {
@@ -108,8 +86,10 @@ pub type UnstableResult<Ok> = Result<Ok, UnstableError>;
 /// General `unstable` namespace errors
 #[derive(Debug, thiserror::Error)]
 pub enum UnstableError {
-    #[error("L1 batch containing the transaction has not been indexed by this node yet")]
-    BlockNotAvailableYet,
+    #[error(
+        "L1 batch containing the transaction has not been finalized or indexed by this node yet"
+    )]
+    BatchNotAvailableYet,
     #[error(transparent)]
     Batch(#[from] anyhow::Error),
     /// Historical block could not be found on this node (e.g., pruned).

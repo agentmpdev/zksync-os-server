@@ -2,6 +2,7 @@ use alloy::primitives::{Address, B256, U256, address, keccak256};
 use alloy::providers::{DynProvider, Provider};
 use alloy::rpc::types::Filter;
 use alloy::sol_types::SolEvent;
+use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::ops;
 use zksync_os_contract_interface::IMessageRoot::AppendedChainBatchRoot;
@@ -172,34 +173,6 @@ fn push_to_tree(tree: &mut Bytes32PushTree, leaf: B256) {
     tree._sides[levels] = current_level_hash;
 }
 
-pub async fn find_sl_block_number_with_execute(
-    commit_block_number: u64,
-    l2_chain_id: u64,
-    batch_number: u64,
-    gw_provider: &DynProvider,
-) -> anyhow::Result<Option<u64>> {
-    let latest_block = gw_provider.get_block_number().await?;
-    let mut from_block = commit_block_number;
-    for _ in 0..10 {
-        let to_block = from_block + 99;
-        let filter = Filter::new()
-            .from_block(from_block.min(latest_block))
-            .to_block(to_block.min(latest_block))
-            .event_signature(AppendedChainBatchRoot::SIGNATURE_HASH)
-            .topic1(U256::from(l2_chain_id))
-            .topic2(U256::from(batch_number))
-            .address(L2_MESSAGE_ROOT_ADDRESS);
-
-        let logs = gw_provider.get_logs(&filter).await?;
-        if !logs.is_empty() {
-            return Ok(Some(logs[0].block_number.unwrap()));
-        }
-
-        from_block += 100;
-    }
-    Ok(None)
-}
-
 #[derive(Debug, Clone)]
 pub struct ChainAggProof {
     pub chain_id_leaf_proof: Vec<B256>,
@@ -212,26 +185,31 @@ pub async fn get_chain_log_proof(
     gw_provider: &DynProvider,
 ) -> anyhow::Result<ChainAggProof> {
     let message_root = IMessageRoot::new(L2_MESSAGE_ROOT_ADDRESS, gw_provider.clone());
-    let merkle_path = message_root
+    let merkle_path_builder = message_root
         .getMerklePathForChain(U256::from(l2_chain_id))
-        .block(gw_block_number.into())
+        .block(gw_block_number.into());
+    let merkle_path_fut = merkle_path_builder
         .call()
-        .await?;
-    let chain_index = message_root
-        .chainIndex(U256::from(l2_chain_id))
+        .into_future()
+        .map_err(|e| anyhow::Error::from(e).context("getMerklePathForChain"));
+    let chain_index_builder = message_root.chainIndex(U256::from(l2_chain_id));
+    let chain_index_fut = chain_index_builder
         .call()
-        .await?;
+        .into_future()
+        .map_err(|e| anyhow::Error::from(e).context("chainIndex"));
+    let (merkle_path, chain_index) =
+        futures::future::try_join(merkle_path_fut, chain_index_fut).await?;
     Ok(ChainAggProof {
         chain_id_leaf_proof: merkle_path,
         chain_id_leaf_proof_mask: chain_index,
     })
 }
 
-pub async fn chain_proof_vector(
+pub fn chain_proof_vector(
     batch_or_block_number: u64,
     chain_agg_proof: ChainAggProof,
-    gw_provider: &DynProvider,
-) -> anyhow::Result<Vec<B256>> {
+    sl_chain_id: u64,
+) -> Vec<B256> {
     const LOG_PROOF_SUPPORTED_METADATA_VERSION: u8 = 1;
 
     let sl_encoded_data = (U256::from(batch_or_block_number) << U256::from(128u32))
@@ -244,8 +222,6 @@ pub async fn chain_proof_vector(
     // Chain proofs are always final nodes in the proofs.
     metadata[3] = 1;
 
-    let sl_chain_id = gw_provider.get_chain_id().await?;
-
     let mut chain_proof_vector = vec![
         B256::from(sl_encoded_data.to_be_bytes()),
         B256::from(U256::from(sl_chain_id).to_be_bytes()),
@@ -253,7 +229,7 @@ pub async fn chain_proof_vector(
     ];
     chain_proof_vector.extend(chain_agg_proof.chain_id_leaf_proof);
 
-    Ok(chain_proof_vector)
+    chain_proof_vector
 }
 
 pub async fn batch_tree_proof(
@@ -265,11 +241,13 @@ pub async fn batch_tree_proof(
     assert!(*gw_block_range.start() > 0);
 
     let message_root = IMessageRoot::new(L2_MESSAGE_ROOT_ADDRESS, gw_provider.clone());
-    let tree = message_root
+    let tree_call_builder = message_root
         .chainTree(U256::from(l2_chain_id))
-        .block((gw_block_range.start() - 1).into())
+        .block((gw_block_range.start() - 1).into());
+    let tree_future = tree_call_builder
         .call()
-        .await?;
+        .into_future()
+        .map_err(|e| anyhow::Error::from(e).context("chainTree"));
 
     let filter = Filter::new()
         .from_block(*gw_block_range.start())
@@ -277,7 +255,12 @@ pub async fn batch_tree_proof(
         .event_signature(AppendedChainBatchRoot::SIGNATURE_HASH)
         .topic1(U256::from(l2_chain_id))
         .address(L2_MESSAGE_ROOT_ADDRESS);
-    let logs = gw_provider.get_logs(&filter).await?;
+    let logs_future = gw_provider
+        .get_logs(&filter)
+        .map_err(|e| anyhow::Error::from(e).context("get_logs for AppendedChainBatchRoot"));
+
+    let (tree, logs) = futures::future::try_join(tree_future, logs_future).await?;
+
     let batch_leaf_padding: B256 = keccak256(b"zkSync:BatchLeaf");
     let batch_idx = logs
         .iter()

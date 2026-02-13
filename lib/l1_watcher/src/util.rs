@@ -319,20 +319,7 @@ pub async fn fetch_stored_batch_data(
     Ok(Some(DiscoveredCommittedBatch {
         batch_info,
         block_range: log.firstBlockNumber..=log.lastBlockNumber,
-        sl_commit_block_number: l1_block_number,
     }))
-}
-
-/// Finds and decodes stored batch data for batch `batch_number`. Returns `None` if there is none.
-pub async fn find_stored_batch_data_by_batch_number(
-    zk_chain: &ZkChain<DynProvider>,
-    batch_number: u64,
-    max_l1_blocks_to_scan: u64,
-) -> anyhow::Result<Option<DiscoveredCommittedBatch>> {
-    let l1_block_with_commit =
-        find_l1_commit_block_by_batch_number(zk_chain.clone(), batch_number, max_l1_blocks_to_scan)
-            .await?;
-    fetch_stored_batch_data(zk_chain, l1_block_with_commit, batch_number).await
 }
 
 /// Commitment information about a batch. Contains enough data to restore `StoredBatchInfo` that

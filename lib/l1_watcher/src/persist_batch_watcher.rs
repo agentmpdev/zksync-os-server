@@ -1,10 +1,13 @@
+use crate::traits::ProcessRawEvents;
 use crate::watcher::{L1Watcher, L1WatcherError};
-use crate::{L1WatcherConfig, ProcessL1Event, util};
-use alloy::primitives::Address;
+use crate::{L1WatcherConfig, util};
+use alloy::primitives::{Address, B256};
 use alloy::providers::{DynProvider, Provider};
-use alloy::rpc::types::Log;
+use alloy::rpc::types::{Log, Topic, ValueOrArray};
+use alloy::sol_types::SolEvent;
+use std::collections::HashMap;
 use zksync_os_batch_types::{BatchInfo, DiscoveredCommittedBatch};
-use zksync_os_contract_interface::IExecutor::ReportCommittedBatchRangeZKsyncOS;
+use zksync_os_contract_interface::IExecutor::{BlockExecution, ReportCommittedBatchRangeZKsyncOS};
 use zksync_os_contract_interface::ZkChain;
 use zksync_os_storage_api::{WriteBatch, WriteFinality};
 
@@ -18,6 +21,7 @@ pub struct L1PersistBatchWatcher<BatchStorage, Finality> {
     zk_chain: ZkChain<DynProvider>,
     batch_storage: BatchStorage,
     finality: Finality,
+    committed_batches: HashMap<B256, DiscoveredCommittedBatch>,
 }
 
 impl<BatchStorage: WriteBatch, Finality: WriteFinality>
@@ -51,6 +55,7 @@ impl<BatchStorage: WriteBatch, Finality: WriteFinality>
             zk_chain: zk_chain.clone(),
             batch_storage,
             finality,
+            committed_batches: HashMap::new(),
         };
         let l1_watcher = L1Watcher::new(
             zk_chain.provider().clone(),
@@ -59,7 +64,7 @@ impl<BatchStorage: WriteBatch, Finality: WriteFinality>
             last_l1_block,
             config.max_blocks_to_process,
             config.poll_interval,
-            this.into(),
+            Box::new(this),
         );
 
         Ok(l1_watcher)
@@ -84,29 +89,14 @@ impl<BatchStorage: WriteBatch, Finality: WriteFinality>
         Ok(DiscoveredCommittedBatch {
             batch_info,
             block_range: report.firstBlockNumber..=report.lastBlockNumber,
-            sl_commit_block_number: log.block_number.unwrap(),
         })
     }
-}
 
-#[async_trait::async_trait]
-impl<BatchStorage: WriteBatch, Finality: WriteFinality> ProcessL1Event
-    for L1PersistBatchWatcher<BatchStorage, Finality>
-{
-    const NAME: &'static str = "persist_batch";
-
-    type SolEvent = ReportCommittedBatchRangeZKsyncOS;
-    type WatchedEvent = ReportCommittedBatchRangeZKsyncOS;
-
-    fn contract_address(&self) -> Address {
-        *self.zk_chain.address()
-    }
-
-    async fn process_event(
+    async fn process_commit(
         &mut self,
         report: ReportCommittedBatchRangeZKsyncOS,
         log: Log,
-    ) -> Result<bool, L1WatcherError> {
+    ) -> Result<(), L1WatcherError> {
         let batch_number = report.batchNumber;
         let latest_persisted_batch = self.batch_storage.latest_batch();
         if batch_number <= latest_persisted_batch {
@@ -151,7 +141,7 @@ impl<BatchStorage: WriteBatch, Finality: WriteFinality> ProcessL1Event
                         latest_persisted_batch,
                         "non-sequential batch discovered; assuming revert and skipping"
                     );
-                    return Ok(true);
+                    return Ok(());
                 }
             }
             tracing::debug!(batch_number, "discovered committed batch");
@@ -184,10 +174,69 @@ impl<BatchStorage: WriteBatch, Finality: WriteFinality> ProcessL1Event
                     batch_number,
                     "batch hash mismatch; ignoring"
                 );
-                return Ok(true);
+                return Ok(());
             }
 
-            self.batch_storage.write(committed_batch);
+            self.committed_batches
+                .insert(stored_batch_hash, committed_batch);
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl<BatchStorage: WriteBatch, Finality: WriteFinality> ProcessRawEvents
+    for L1PersistBatchWatcher<BatchStorage, Finality>
+{
+    fn name(&self) -> &'static str {
+        "persist_batch"
+    }
+
+    fn event_signatures(&self) -> Topic {
+        Topic::default()
+            .extend(ReportCommittedBatchRangeZKsyncOS::SIGNATURE_HASH)
+            .extend(BlockExecution::SIGNATURE_HASH)
+    }
+
+    fn contract_addresses(&self) -> ValueOrArray<Address> {
+        (*self.zk_chain.address()).into()
+    }
+
+    async fn process_raw_event(&mut self, log: Log) -> Result<bool, L1WatcherError> {
+        let event_signature = log.topics()[0];
+        match event_signature {
+            s if s == ReportCommittedBatchRangeZKsyncOS::SIGNATURE_HASH => {
+                let report = ReportCommittedBatchRangeZKsyncOS::decode_log(&log.inner)?.data;
+                self.process_commit(report, log).await?;
+            }
+            s if s == BlockExecution::SIGNATURE_HASH => {
+                let execute = BlockExecution::decode_log(&log.inner)?.data;
+                let batch_number = execute.batchNumber.to::<u64>();
+                let batch_hash = execute.batchHash;
+                if let Some(committed_batch) = self.committed_batches.remove(&batch_hash) {
+                    tracing::debug!(
+                        batch_number,
+                        ?batch_hash,
+                        "discovered executed batch, persisting"
+                    );
+                    self.batch_storage.write(
+                        committed_batch,
+                        log.block_number.expect("Missing block number in log"),
+                    );
+                } else {
+                    // Theoretically, it's possible to discover `BlockExecution` event that was eventually reverted on L1.
+                    tracing::info!(
+                        batch_number,
+                        ?batch_hash,
+                        "ignoring executed batch event, supposedly it was not reverted on SL"
+                    );
+                }
+            }
+            _ => {
+                return Err(L1WatcherError::Other(anyhow::anyhow!(
+                    "unexpected event topic"
+                )));
+            }
         }
         Ok(true)
     }

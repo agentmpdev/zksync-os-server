@@ -49,7 +49,6 @@ use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use tower_http::cors::{Any, CorsLayer};
 use zksync_os_genesis::GenesisInputSource;
 use zksync_os_interface::types::BlockContext;
-use zksync_os_l1_watcher::CommittedBatchProvider;
 use zksync_os_mempool::L2TransactionPool;
 use zksync_os_rpc_api::debug::DebugApiServer;
 use zksync_os_rpc_api::eth::EthApiServer;
@@ -68,7 +67,6 @@ pub async fn run_jsonrpsee_server<RpcStorage: ReadRpcStorage, Mempool: L2Transac
     chain_id: u64,
     bridgehub_address: Address,
     bytecode_supplier_address: Address,
-    committed_batch_provider: CommittedBatchProvider,
     storage: RpcStorage,
     mempool: Mempool,
     genesis_input_source: Arc<dyn GenesisInputSource>,
@@ -105,7 +103,6 @@ pub async fn run_jsonrpsee_server<RpcStorage: ReadRpcStorage, Mempool: L2Transac
         ZksNamespace::new(
             bridgehub_address,
             bytecode_supplier_address,
-            committed_batch_provider.clone(),
             storage.clone(),
             genesis_input_source,
             chain_id,
@@ -117,7 +114,7 @@ pub async fn run_jsonrpsee_server<RpcStorage: ReadRpcStorage, Mempool: L2Transac
     rpc.merge(DebugNamespace::new(storage.clone(), eth_call_handler).into_rpc())?;
     rpc.merge(NetNamespace::new(chain_id).into_rpc())?;
     rpc.merge(Web3Namespace.into_rpc())?;
-    rpc.merge(UnstableNamespace::new(committed_batch_provider, storage).into_rpc())?;
+    rpc.merge(UnstableNamespace::new(storage).into_rpc())?;
 
     // Add a CORS middleware for handling HTTP requests.
     // This middleware does affect the response, including appropriate

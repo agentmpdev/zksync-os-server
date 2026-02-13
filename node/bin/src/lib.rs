@@ -788,7 +788,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             chain_id,
             bridgehub_address,
             bytecode_supplier_address,
-            committed_batch_provider,
             rpc_storage,
             l2_mempool,
             genesis_input_source,

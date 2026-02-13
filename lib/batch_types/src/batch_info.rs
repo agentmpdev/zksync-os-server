@@ -198,7 +198,6 @@ impl BatchInfo {
             dependency_roots_rolling_hash: commit_info.dependency_roots_rolling_hash,
             l2_to_l1_logs_root_hash: commit_info.l2_to_l1_logs_root_hash,
             commitment,
-            last_block_timestamp: commit_info.last_block_timestamp,
         }
     }
 }
@@ -292,8 +291,6 @@ pub struct DiscoveredCommittedBatch {
     pub batch_info: StoredBatchInfo,
     /// Range of L2 blocks that belong to this batch.
     pub block_range: ops::RangeInclusive<BlockNumber>,
-    /// TODO: replace with `sl_execute_block_number` if possible
-    pub sl_commit_block_number: BlockNumber,
 }
 
 impl DiscoveredCommittedBatch {

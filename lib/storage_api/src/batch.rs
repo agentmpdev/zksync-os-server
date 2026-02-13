@@ -14,6 +14,12 @@ pub trait ReadBatch: Send + Sync + 'static {
         batch_number: u64,
     ) -> anyhow::Result<Option<DiscoveredCommittedBatch>>;
 
+    /// Get the settlement layer block number at which the batch was executed by the batch's number.
+    fn get_execute_sl_block_number_by_batch_number(
+        &self,
+        batch_number: u64,
+    ) -> anyhow::Result<Option<u64>>;
+
     /// Returns the latest (greatest) batch's number.
     ///
     /// This method:
@@ -30,5 +36,5 @@ pub trait ReadBatch: Send + Sync + 'static {
 /// A write-capable counterpart of [`ReadBatch`] that allows to write new batches to the storage.
 pub trait WriteBatch: ReadBatch {
     /// Writes a new batch to storage.
-    fn write(&self, batch: DiscoveredCommittedBatch);
+    fn write(&self, batch: DiscoveredCommittedBatch, execute_sl_block_number: u64);
 }
