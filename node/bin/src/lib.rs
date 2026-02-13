@@ -114,11 +114,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     let mut tasks: JoinSet<()> = JoinSet::new();
 
     let node_role = config.general_config.node_role.clone();
-    let role: &'static str = if node_role.is_main() {
-        "main_node"
-    } else {
-        "external_node"
-    };
+    let role: &'static str = node_role.as_str();
 
     // Priority tree is required for main node
     if node_role.is_main() && !config.general_config.run_priority_tree {
