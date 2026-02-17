@@ -1,6 +1,7 @@
 use alloy::consensus::{EMPTY_OMMER_ROOT_HASH, Header};
 use alloy::eips::eip1559::INITIAL_BASE_FEE;
-use alloy::primitives::{Address, B64, B256, Bloom, Sealable, Sealed, U256, Uint, address};
+use alloy::hex;
+use alloy::primitives::{Address, B64, B256, Bloom, Sealable, Sealed, U256};
 use alloy::providers::{DynProvider, Provider};
 use alloy::rpc::types::Filter;
 use alloy::sol_types::SolEvent;
@@ -48,6 +49,10 @@ pub struct GenesisInput {
     /// Same format as before.
     #[serde(default)]
     pub additional_storage_raw: Vec<(B256, B256)>,
+
+    /// Additional preimages to add to the genesis state.
+    #[serde(default)]
+    pub additional_preimages: Vec<(B256, String)>,
 
     /// Execution version used for genesis.
     pub execution_version: u32,
@@ -238,26 +243,12 @@ async fn build_genesis(
         ));
     }
 
-    // Minting huge amount of tokens to BASE_TOKEN_HOLDER(10011) address
-    let base_token_holder_address = address!("0x0000000000000000000000000000000000010011");
-
-    let account_properties = AccountProperties {
-        balance: Uint::from(u128::MAX),
-        ..Default::default()
-    };
-
-    let flat_storage_key = account_properties_flat_key(base_token_holder_address);
-
-    let account_properties_hash = account_properties.compute_hash();
-    storage_logs.insert(
-        flat_storage_key,
-        account_properties_hash.as_u8_array().into(),
-    );
-
-    preimages.push((
-        account_properties_hash.as_u8_array().into(),
-        account_properties.encoding().to_vec(),
-    ));
+    for (hash, preimage) in genesis_input.additional_preimages {
+        preimages.push((
+            hash,
+            hex::decode(preimage).expect("Failed to decode preimage"),
+        ));
+    }
 
     // 1) Insert RAW additional storage first
     for (key, value) in genesis_input.additional_storage_raw {

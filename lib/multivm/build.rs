@@ -10,16 +10,10 @@ fn parse_git_tag(package_id: &PackageId) -> anyhow::Result<String> {
     Ok(tag.to_string())
 }
 
-pub fn execution_version_from_tag(tag: &str) -> String {
+pub fn execution_version_from_tag(tag: &str) -> Option<String> {
     match tag {
-        "v0.0.27-interface-v0.0.13" => String::from("V3"),
-        "v0.1.1-interface-v0.0.13" => String::from("V4"),
-        "v0.2.7-interface-v0.0.13" => String::from("V5"),
-        "v0.2.7-simulation-only-interface-v0.0.13" => String::from("V5_SIMULATION"),
-        "dev-20260211-3" => String::from("V6"),
-        _ => panic!(
-            "Unknown ZKsync OS execution version: {tag}, please update the mapping in lib/multivm/build.rs"
-        ),
+        "v0.2.7-interface-v0.0.13" => Some(String::from("V6")),
+        _ => None,
     }
 }
 
@@ -40,26 +34,29 @@ fn main() {
             }
         };
 
-        let dir = format!("{manifest_dir}/apps/{tag}");
-        std::fs::create_dir_all(&dir).expect("failed to create directory");
-        for variant in [
-            "multiblock_batch",
-            "singleblock_batch",
-            "singleblock_batch_logging_enabled",
-        ] {
-            let url = format!(
-                "https://github.com/matter-labs/zksync-os/releases/download/{tag}/{variant}.bin"
-            );
-            let path = format!("{dir}/{variant}.bin");
-            if std::fs::exists(&path).expect("failed to check file existence") {
-                continue;
-            }
-            let resp = reqwest::blocking::get(url).expect("failed to download");
-            let body = resp.bytes().expect("failed to read response body").to_vec();
-            std::fs::write(path, body).expect("failed to write file");
-        }
-
         let execution_version = execution_version_from_tag(&tag);
-        println!("cargo:rustc-env=ZKSYNC_OS_{execution_version}_SOURCE_PATH={dir}");
+
+        if let Some(execution_version) = execution_version {
+            let dir = format!("{manifest_dir}/apps/{tag}");
+            std::fs::create_dir_all(&dir).expect("failed to create directory");
+            for variant in [
+                "multiblock_batch",
+                "singleblock_batch",
+                "singleblock_batch_logging_enabled",
+            ] {
+                let url = format!(
+                    "https://github.com/matter-labs/zksync-os/releases/download/{tag}/{variant}.bin"
+                );
+                let path = format!("{dir}/{variant}.bin");
+                if std::fs::exists(&path).expect("failed to check file existence") {
+                    continue;
+                }
+                let resp = reqwest::blocking::get(url).expect("failed to download");
+                let body = resp.bytes().expect("failed to read response body").to_vec();
+                std::fs::write(path, body).expect("failed to write file");
+            }
+
+            println!("cargo:rustc-env=ZKSYNC_OS_{execution_version}_SOURCE_PATH={dir}");
+        }
     }
 }
