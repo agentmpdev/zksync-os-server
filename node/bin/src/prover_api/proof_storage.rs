@@ -14,39 +14,43 @@ pub struct ProofStorageConfig {
     pub path: PathBuf,
     //1GB by default
     #[config(default_t = 1073741824)]
-    pub batch_capacity: u64,
+    pub batch_with_proof_capacity: u64,
     #[config(default_t = 1073741824)]
-    pub failed_batch_capacity: u64,
+    pub failed_capacity: u64,
 }
 
 impl Default for ProofStorageConfig {
     fn default() -> Self {
         Self {
             path: "./db/fri_proofs/".into(),
-            batch_capacity: 1 << 30,
-            failed_batch_capacity: 1 << 30,
+            batch_with_proof_capacity: 1 << 30,
+            failed_capacity: 1 << 30,
         }
     }
 }
 
+///Persists FRI proofs to disk together with the batch if proof is successful
 #[derive(Clone, Debug)]
 pub struct ProofStorage {
-    storage: BoundedFileStore,
-    failed_storage: BoundedFileStore,
+    batches_with_proof: BoundedFileStorage,
+    failed: BoundedFileStorage,
 }
 impl ProofStorage {
     pub fn new(config: ProofStorageConfig) -> Self {
         tracing::info!(
             path = config.path.to_str().unwrap(),
-            batch_capacity = config.batch_capacity,
-            failed_batch_capacity = config.failed_batch_capacity,
+            batch_with_proof_capacity = config.batch_with_proof_capacity,
+            failed_capacity = config.failed_capacity,
             "Initializing proof storage"
         );
         Self {
-            storage: BoundedFileStore::new(config.path.join("fri_batches"), config.batch_capacity),
-            failed_storage: BoundedFileStore::new(
+            batches_with_proof: BoundedFileStorage::new(
+                config.path.join("fri_batches"),
+                config.batch_with_proof_capacity,
+            ),
+            failed: BoundedFileStorage::new(
                 config.path.join("failed_proofs"),
-                config.failed_batch_capacity,
+                config.failed_capacity,
             ),
         }
     }
@@ -54,7 +58,7 @@ impl ProofStorage {
     /// Persist a BatchWithProof. Overwrites any existing entry for the same batch.
     pub async fn save_batch_with_proof(&self, batch: &StoredBatch) -> anyhow::Result<()> {
         let key = format!("batch_{}.json", batch.batch_number());
-        self.storage.store(&key, batch).await
+        self.batches_with_proof.store(&key, batch).await
     }
 
     /// Loads a BatchWithProof for `batch_number`, if present
@@ -63,23 +67,23 @@ impl ProofStorage {
         batch_num: u64,
     ) -> anyhow::Result<Option<SignedBatchEnvelope<FriProof>>> {
         let key = format!("batch_{batch_num}.json");
-        match self.storage.load::<StoredBatch>(&key).await {
+        match self.batches_with_proof.load::<StoredBatch>(&key).await {
             Ok(o) => Ok(o.map(|o| o.batch_envelope())),
             Err(err) => Err(err),
         }
     }
 
-    /// Save a failed FRI proof with batch metadata for debugging.
+    /// Save a failed FRI proof for debugging.
     pub async fn save_failed_proof(&self, proof: &FailedFriProof) -> anyhow::Result<()> {
         let key = format!("failed_{}.json", proof.batch_number);
-        self.failed_storage.store(&key, proof).await
+        self.failed.store(&key, proof).await
     }
 
     /// Get the failed proof for a given batch number.
     /// Returns None if no failed proof exists for this batch.
     pub async fn get_failed_proof(&self, batch_num: u64) -> anyhow::Result<Option<FailedFriProof>> {
         let key = format!("failed_{batch_num}.json");
-        self.failed_storage.load(&key).await
+        self.failed.load(&key).await
     }
 }
 
@@ -105,21 +109,21 @@ impl StoredBatch {
 
 /// Storage for data blobs that
 /// automatically removes old files to keep disk usage within capacity_bytes
-/// TODO: Clone???
 #[derive(Clone, Debug)]
-struct BoundedFileStore {
+struct BoundedFileStorage {
     base_dir: PathBuf,
     capacity_bytes: u64,
     capacity_files: u64,
 }
 
-impl BoundedFileStore {
-    const CAPACITY_FILES: u64 = 1000;
+impl BoundedFileStorage {
+    // This limit is present because we scan the files on every write to get the size
+    const CAPACITY_FILES: u64 = 600;
     fn new(base_dir: PathBuf, capacity_bytes: u64) -> Self {
         Self {
             base_dir,
             capacity_bytes,
-            capacity_files: BoundedFileStore::CAPACITY_FILES,
+            capacity_files: BoundedFileStorage::CAPACITY_FILES,
         }
     }
 
@@ -147,7 +151,7 @@ impl BoundedFileStore {
             return Ok(None);
         }
 
-        let data = fs::read(path).await.expect("Failed to read file");
+        let data = fs::read(path).await?;
         let decoded = serde_json::from_slice(&data).expect("Deserialization failed");
         Ok(Some(decoded))
     }
@@ -182,25 +186,26 @@ impl BoundedFileStore {
     }
 }
 
+//Since this data isn't used by the node itself, I added some tests
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use tempfile::TempDir;
 
+    //Make sure files are being removed as expected
     #[tokio::test]
     async fn test_bounded_storage_capacity() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let path = dir.path().to_owned();
-        let storage = BoundedFileStore::new(path, 1 << 20);
+        let storage = BoundedFileStorage::new(path, 1 << 20);
 
         //verify file capacity
-        let capacity_files = BoundedFileStore::CAPACITY_FILES;
+        let capacity_files = BoundedFileStorage::CAPACITY_FILES;
         for i in 0..2000 {
             let str: String = i.to_string();
             storage.store(&str, &str).await?;
             assert_eq!(storage.load::<String>(str.as_str()).await?, Some(str));
-            if (i >= capacity_files) {
+            if i >= capacity_files {
                 assert!(
                     storage
                         .load::<String>(&(i - capacity_files + 1).to_string())
@@ -235,14 +240,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_bounded_storage_overwrites() -> anyhow::Result<()> {
-        const limit: u64 = 1 << 20;
+        const LIMIT: u64 = 1 << 20;
         let dir = TempDir::new()?;
         let path = dir.path().to_owned();
-        let storage = BoundedFileStore::new(path, limit);
-        let big_str_a = "a".repeat((limit * 2 / 3) as usize);
+        let storage = BoundedFileStorage::new(path, LIMIT);
+        let big_str_a = "a".repeat((LIMIT * 2 / 3) as usize);
         storage.store("key", &big_str_a).await?;
         assert_eq!(storage.load("key").await?, Some(big_str_a));
-        let big_str_b = "b".repeat((limit * 2 / 3) as usize);
+        let big_str_b = "b".repeat((LIMIT * 2 / 3) as usize);
         storage.store("key", &big_str_b).await?;
         assert_eq!(storage.load("key").await?, Some(big_str_b));
 
