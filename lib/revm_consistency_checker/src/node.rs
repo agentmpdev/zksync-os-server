@@ -192,7 +192,8 @@ where
             };
 
             if let Some(compare_report) = &compare_report {
-                self.handle_report(&block_output, &replay_record, compare_report).await?;
+                self.handle_report(&block_output, &replay_record, compare_report)
+                    .await?;
             }
 
             latency_tracker.enter_state(GenericComponentState::WaitingSend);

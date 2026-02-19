@@ -223,8 +223,8 @@ impl RepositoryDb {
                 batch.delete_cf(RepositoryCF::BlockNumberToHash, &block_number_bytes);
 
                 for tx_hash in &old_repo_block.body.transactions {
-                    // Deletes `TxReceipt` entry.
-                    // `Tx` and `TxMeta` entries are preserved so that the transaction is still queryable by hash.
+                    // Deletes only `InitiatorAndNonceToHash` entry.
+                    // `Tx`, `TxMeta` and `TxReceipt` entries are preserved so that the transaction and its receipt are still queryable by hash.
                     batch.delete_cf(RepositoryCF::TxReceipt, &tx_hash.0);
 
                     let tx = self
