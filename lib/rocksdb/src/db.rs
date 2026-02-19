@@ -695,6 +695,13 @@ impl<CF: NamedColumnFamily> RocksDB<CF> {
             multiget_read_size: AtomicU64::new(0),
         }
     }
+
+    pub fn flush_wal(&self, sync: bool) {
+        self.inner
+            .db
+            .flush_wal(sync)
+            .expect("Failed flushing RocksDB WAL");
+    }
 }
 
 impl RocksDB<()> {

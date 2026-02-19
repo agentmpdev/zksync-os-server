@@ -10,6 +10,7 @@ use zksync_os_internal_config::InternalConfigManager;
 use zksync_os_observability::{ComponentStateReporter, GenericComponentState};
 use zksync_os_pipeline::{PeekableReceiver, PipelineComponent};
 use zksync_os_revm::{DefaultZk, ZkBuilder};
+use zksync_os_storage::db::RepositoryDb;
 use zksync_os_storage_api::{ReadStateHistory, ReplayRecord};
 use zksync_os_types::ExecutionVersion;
 
@@ -24,6 +25,7 @@ where
     state: State,
     internal_config_manager: InternalConfigManager,
     revert_enabled: bool,
+    repository_db: RepositoryDb,
 }
 
 impl<State> RevmConsistencyChecker<State>
@@ -34,15 +36,17 @@ where
         state: State,
         internal_config_manager: InternalConfigManager,
         revert_enabled: bool,
+        repository_db: RepositoryDb,
     ) -> Self {
         Self {
             state,
             internal_config_manager,
             revert_enabled,
+            repository_db,
         }
     }
 
-    pub fn handle_report(
+    pub async fn handle_report(
         &self,
         block_output: &BlockOutput,
         replay_record: &ReplayRecord,
@@ -50,6 +54,11 @@ where
     ) -> anyhow::Result<()> {
         report.log_tracing(20);
         if self.revert_enabled && !report.is_empty() {
+            // Wait for block to be present in repo rocksdb WAL so it's available after restart.
+            self.repository_db
+                .wait_for_block_in_wal(replay_record.block_context.block_number)
+                .await;
+
             let mut config = self.internal_config_manager.read_config()?;
             config.failing_block = Some(replay_record.block_context.block_number);
 
@@ -137,7 +146,7 @@ where
                 .state_view_at(state_block_number)
                 .map_err(anyhow::Error::from)?;
 
-            if let Some(zk_spec) = zk_spec {
+            let compare_report = if let Some(zk_spec) = zk_spec {
                 // For each block, we create an in-memory cache database to accumulate transaction state changes separately
                 let state_provider =
                     RevmStateProvider::new(state_view, block_hashes, state_block_number);
@@ -173,12 +182,17 @@ where
                     });
 
                 evm.transact_many_commit(revm_txs)?;
-                let compare_report = CompareReport::build(
+                Some(CompareReport::build(
                     evm.0.db_mut(),
                     &block_output.storage_writes,
                     &block_output.account_diffs,
-                )?;
-                self.handle_report(&block_output, &replay_record, &compare_report)?;
+                )?)
+            } else {
+                None
+            };
+
+            if let Some(compare_report) = &compare_report {
+                self.handle_report(&block_output, &replay_record, compare_report).await?;
             }
 
             latency_tracker.enter_state(GenericComponentState::WaitingSend);

@@ -91,7 +91,7 @@ use zksync_os_storage::in_memory::Finality;
 use zksync_os_storage::lazy::RepositoryManager;
 use zksync_os_storage_api::{
     FinalityStatus, ReadFinality, ReadReplay, ReadRepository, ReadStateHistory, ReplayRecord,
-    WriteReplay, WriteRepository, WriteState,
+    WriteReplay, WriteState,
 };
 use zksync_os_types::{
     InteropRootsLogIndex, ProtocolSemanticVersion, PubdataMode, TransactionAcceptanceState,
@@ -800,7 +800,7 @@ async fn run_main_node_pipeline(
     tasks: &mut JoinSet<()>,
     state: impl ReadStateHistory + WriteState + Clone,
     starting_block: u64,
-    repositories: impl WriteRepository + Clone,
+    repositories: RepositoryManager,
     block_context_provider: BlockContextProvider<impl L2TransactionPool>,
     tree: MerkleTree<RocksDBWrapper>,
     finality: impl ReadFinality + Clone,
@@ -896,6 +896,7 @@ async fn run_main_node_pipeline(
                         config
                             .sequencer_config
                             .revm_consistency_checker_revert_on_divergence,
+                        repositories.db(),
                     )
                 }),
         )
@@ -984,7 +985,7 @@ async fn run_en_pipeline(
     block_context_provider: BlockContextProvider<impl L2TransactionPool>,
     state: impl ReadStateHistory + WriteState + Clone,
     tree: MerkleTree<RocksDBWrapper>,
-    repositories: impl WriteRepository + Clone,
+    repositories: RepositoryManager,
     finality: impl ReadFinality + Clone,
     stop_receiver: watch::Receiver<bool>,
     tx_acceptance_state_sender: watch::Sender<TransactionAcceptanceState>,
@@ -1022,6 +1023,7 @@ async fn run_en_pipeline(
                         config
                             .sequencer_config
                             .revm_consistency_checker_revert_on_divergence,
+                        repositories.db(),
                     )
                 }),
         )

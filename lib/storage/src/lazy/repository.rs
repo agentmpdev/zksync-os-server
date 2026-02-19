@@ -97,6 +97,11 @@ impl RepositoryManager {
             REPOSITORIES_METRICS.persist_block_number.set(block_number);
         }
     }
+
+    #[doc(hidden)]
+    pub fn db(&self) -> RepositoryDb {
+        self.db.clone()
+    }
 }
 
 impl ReadRepository for RepositoryManager {
@@ -189,7 +194,8 @@ impl WriteRepository for RepositoryManager {
     ) -> RepositoryResult<()> {
         if !self.db_ready_to_process_blocks.load(Ordering::Relaxed) {
             if block_output.header.number > 0 {
-                self.db.rollback(block_output.header.number - 1)?;
+                self.db
+                    .rollback_canonical_indices(block_output.header.number - 1)?;
             }
 
             self.db_ready_to_process_blocks

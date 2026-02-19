@@ -118,6 +118,11 @@ impl RepositoryDb {
             .unwrap()
     }
 
+    pub async fn wait_for_block_in_wal(&self, block_number: u64) {
+        self.wait_for_block_number(block_number).await;
+        self.db.flush_wal(true);
+    }
+
     fn write_block_inner(
         db: &RocksDB<RepositoryCF>,
         block: &Sealed<Block<TxHash>>,
@@ -186,7 +191,9 @@ impl RepositoryDb {
         );
     }
 
-    pub fn rollback(&self, last_block_to_keep: u64) -> RepositoryResult<()> {
+    /// Deletes indices for blocks and their transactions from the DB,
+    /// so the blocks and transactions are only available by their hashes.
+    pub fn rollback_canonical_indices(&self, last_block_to_keep: u64) -> RepositoryResult<()> {
         let latest_block_number = self
             .db
             .get_cf(RepositoryCF::Meta, RepositoryCF::block_number_key())?
@@ -212,13 +219,13 @@ impl RepositoryDb {
                     .get_block_by_number(block_number)?
                     .expect("block to rollback must be present in DB");
                 let block_number_bytes = block_number.to_be_bytes();
+                // Deletes `BlockNumberToHash` entry, `BlockData` entry is preserved so that the block is still queryable by hash.
                 batch.delete_cf(RepositoryCF::BlockNumberToHash, &block_number_bytes);
-                batch.delete_cf(RepositoryCF::BlockData, &old_repo_block.hash().0);
 
                 for tx_hash in &old_repo_block.body.transactions {
-                    batch.delete_cf(RepositoryCF::Tx, &tx_hash.0);
+                    // Deletes `TxReceipt` entry.
+                    // `Tx` and `TxMeta` entries are preserved so that the transaction is still queryable by hash.
                     batch.delete_cf(RepositoryCF::TxReceipt, &tx_hash.0);
-                    batch.delete_cf(RepositoryCF::TxMeta, &tx_hash.0);
 
                     let tx = self
                         .get_transaction(*tx_hash)?
@@ -228,6 +235,7 @@ impl RepositoryDb {
                     let mut initiator_and_nonce_key = Vec::with_capacity(20 + 8);
                     initiator_and_nonce_key.extend_from_slice(initiator.as_slice());
                     initiator_and_nonce_key.extend_from_slice(&nonce.to_be_bytes());
+                    // Delete `InitiatorAndNonceToHash` entry.
                     batch.delete_cf(
                         RepositoryCF::InitiatorAndNonceToHash,
                         &initiator_and_nonce_key,
