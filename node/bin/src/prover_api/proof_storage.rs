@@ -17,6 +17,8 @@ pub struct ProofStorage {
     failed: Arc<Mutex<BoundedFileStorage>>,
 }
 impl ProofStorage {
+    // This limit is present because we scan the files on every write to get the size
+    const CAPACITY_FILES: u64 = 600;
     pub fn new(config: ProofStorageConfig) -> Self {
         tracing::info!(
             path = config.path.to_str().unwrap(),
@@ -28,10 +30,12 @@ impl ProofStorage {
             batches_with_proof: Arc::new(Mutex::new(BoundedFileStorage::new(
                 config.path.join("fri_batches"),
                 config.batch_with_proof_capacity,
+                Self::CAPACITY_FILES,
             ))),
             failed: Arc::new(Mutex::new(BoundedFileStorage::new(
                 config.path.join("failed_proofs"),
                 config.failed_capacity,
+                Self::CAPACITY_FILES,
             ))),
         }
     }
@@ -39,11 +43,13 @@ impl ProofStorage {
     /// Persist a BatchWithProof. Overwrites any existing entry for the same batch.
     pub async fn save_batch_with_proof(&self, batch: &StoredBatch) -> anyhow::Result<()> {
         let key = format!("batch_{}.json", batch.batch_number());
-        self.batches_with_proof
+        let usage = self
+            .batches_with_proof
             .lock()
             .await
             .store(&key, batch)
-            .await
+            .await?;
+        Ok(())
     }
 
     /// Loads a BatchWithProof for `batch_number`, if present
@@ -67,7 +73,8 @@ impl ProofStorage {
     /// Save a failed FRI proof for debugging.
     pub async fn save_failed_proof(&self, proof: &FailedFriProof) -> anyhow::Result<()> {
         let key = format!("failed_{}.json", proof.batch_number);
-        self.failed.lock().await.store(&key, proof).await
+        let usage = self.failed.lock().await.store(&key, proof).await?;
+        Ok(())
     }
 
     /// Get the failed proof for a given batch number.
@@ -116,22 +123,23 @@ struct BoundedFileStorage {
 }
 
 impl BoundedFileStorage {
-    // This limit is present because we scan the files on every write to get the size
-    const CAPACITY_FILES: u64 = 600;
-    fn new(base_dir: PathBuf, capacity_bytes: u64) -> Self {
+    fn new(base_dir: PathBuf, capacity_bytes: u64, capacity_files: u64) -> Self {
         Self {
             base_dir,
             capacity_bytes,
-            capacity_files: BoundedFileStorage::CAPACITY_FILES,
+            capacity_files,
         }
     }
 
-    async fn store<T: Serialize>(&self, key: &str, value: &T) -> anyhow::Result<()> {
+    /// Stores serialized value as a file named `key`,
+    /// removes old files to enforce capacity constraints and
+    /// returns disk usage
+    async fn store<T: Serialize>(&self, key: &str, value: &T) -> anyhow::Result<u64> {
         fs::create_dir_all(&self.base_dir).await?;
 
         let file_path = self.base_dir.join(key);
         let data = serde_json::to_vec(value)?;
-        self.enforce_capacity(data.len() as u64).await?;
+        let usage = self.enforce_capacity(data.len() as u64).await?;
         if (data.len() as u64) <= self.capacity_bytes {
             fs::write(file_path, data).await?;
         } else {
@@ -141,7 +149,7 @@ impl BoundedFileStorage {
                 "Entry size is larger than the limit. Not saving.",
             );
         }
-        Ok(())
+        Ok(usage)
     }
 
     async fn load<T: DeserializeOwned>(&self, key: &str) -> anyhow::Result<Option<T>> {
@@ -156,7 +164,8 @@ impl BoundedFileStorage {
     }
 
     /// Delete old files to make space for the new file
-    async fn enforce_capacity(&self, new_file_size: u64) -> anyhow::Result<()> {
+    /// Returns disk usage
+    async fn enforce_capacity(&self, new_file_size: u64) -> anyhow::Result<u64> {
         // List all files sorted by timestamp (descending)
         let mut entries = fs::read_dir(&self.base_dir).await?;
         let mut files = Vec::new();
@@ -181,7 +190,7 @@ impl BoundedFileStorage {
         for (path, _) in files_to_delete {
             fs::remove_file(path).await?;
         }
-        Ok(())
+        Ok(current_size)
     }
 }
 
@@ -196,10 +205,10 @@ mod tests {
     async fn test_bounded_storage_capacity() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
         let path = dir.path().to_owned();
-        let storage = BoundedFileStorage::new(path, 1 << 20);
+        let capacity_files = 600;
+        let storage = BoundedFileStorage::new(path, 1 << 20, capacity_files);
 
         //verify file capacity
-        let capacity_files = BoundedFileStorage::CAPACITY_FILES;
         for i in 0..2000 {
             let str: String = i.to_string();
             storage.store(&str, &str).await?;
