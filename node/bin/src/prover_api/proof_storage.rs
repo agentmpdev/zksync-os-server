@@ -4,15 +4,17 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::fs;
+use tokio::sync::Mutex;
 use zksync_os_l1_sender::batcher_model::{FriProof, SignedBatchEnvelope};
 
 ///Persists FRI proofs to disk together with the batch if proof is successful
 #[derive(Clone, Debug)]
 pub struct ProofStorage {
-    batches_with_proof: BoundedFileStorage,
-    failed: BoundedFileStorage,
+    batches_with_proof: Arc<Mutex<BoundedFileStorage>>,
+    failed: Arc<Mutex<BoundedFileStorage>>,
 }
 impl ProofStorage {
     pub fn new(config: ProofStorageConfig) -> Self {
@@ -23,21 +25,25 @@ impl ProofStorage {
             "Initializing proof storage"
         );
         Self {
-            batches_with_proof: BoundedFileStorage::new(
+            batches_with_proof: Arc::new(Mutex::new(BoundedFileStorage::new(
                 config.path.join("fri_batches"),
                 config.batch_with_proof_capacity,
-            ),
-            failed: BoundedFileStorage::new(
+            ))),
+            failed: Arc::new(Mutex::new(BoundedFileStorage::new(
                 config.path.join("failed_proofs"),
                 config.failed_capacity,
-            ),
+            ))),
         }
     }
 
     /// Persist a BatchWithProof. Overwrites any existing entry for the same batch.
     pub async fn save_batch_with_proof(&self, batch: &StoredBatch) -> anyhow::Result<()> {
         let key = format!("batch_{}.json", batch.batch_number());
-        self.batches_with_proof.store(&key, batch).await
+        self.batches_with_proof
+            .lock()
+            .await
+            .store(&key, batch)
+            .await
     }
 
     /// Loads a BatchWithProof for `batch_number`, if present
@@ -46,7 +52,13 @@ impl ProofStorage {
         batch_num: u64,
     ) -> anyhow::Result<Option<SignedBatchEnvelope<FriProof>>> {
         let key = format!("batch_{batch_num}.json");
-        match self.batches_with_proof.load::<StoredBatch>(&key).await {
+        match self
+            .batches_with_proof
+            .lock()
+            .await
+            .load::<StoredBatch>(&key)
+            .await
+        {
             Ok(o) => Ok(o.map(|o| o.batch_envelope())),
             Err(err) => Err(err),
         }
@@ -55,14 +67,14 @@ impl ProofStorage {
     /// Save a failed FRI proof for debugging.
     pub async fn save_failed_proof(&self, proof: &FailedFriProof) -> anyhow::Result<()> {
         let key = format!("failed_{}.json", proof.batch_number);
-        self.failed.store(&key, proof).await
+        self.failed.lock().await.store(&key, proof).await
     }
 
     /// Get the failed proof for a given batch number.
     /// Returns None if no failed proof exists for this batch.
     pub async fn get_failed_proof(&self, batch_num: u64) -> anyhow::Result<Option<FailedFriProof>> {
         let key = format!("failed_{batch_num}.json");
-        self.failed.load(&key).await
+        self.failed.lock().await.load(&key).await
     }
 }
 
