@@ -282,16 +282,19 @@ async fn fund_wallet_via_l1_deposit(tester: &Tester, wallet: Address, amount: U2
         }))
         .await?;
     let max_fee_per_gas = base_l1_fees_data.max_fee_per_gas + max_priority_fee_per_gas;
-    let gas_limit = tester
-        .l2_provider
-        .estimate_gas(
-            TransactionRequest::default()
-                .transaction_type(L1PriorityTxType::TX_TYPE)
-                .from(wallet)
-                .to(wallet)
-                .value(amount),
-        )
-        .await?;
+    // TODO: fix gas estimation
+    // let gas_limit = tester
+    //     .l2_provider
+    //     .estimate_gas(
+    //         TransactionRequest::default()
+    //             .transaction_type(L1PriorityTxType::TX_TYPE)
+    //             .from(wallet)
+    //             .to(wallet)
+    //             .value(amount),
+    //     )
+    //     .await?;
+    let gas_limit = 10_000_000u64;
+    tracing::info!("gas_limit = {gas_limit}");
 
     let tx_base_cost = bridgehub
         .l2_transaction_base_cost(

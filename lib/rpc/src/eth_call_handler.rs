@@ -126,6 +126,12 @@ impl<RpcStorage: ReadRpcStorage> EthCallHandler<RpcStorage> {
 
         match request.transaction_type {
             Some(L1PriorityTxType::TX_TYPE) => {
+                let to_mint = if block_context.execution_version >= ExecutionVersion::V6 as u32 {
+                    // After V31, L1 transactions only need to mint the fee
+                    U256::from(gas_price) * U256::from(gas_limit)
+                } else {
+                    value + U256::from(gas_price) * U256::from(gas_limit)
+                };
                 let inner = L1Tx {
                     hash: B256::ZERO,
                     initiator: from,
@@ -136,7 +142,7 @@ impl<RpcStorage: ReadRpcStorage> EthCallHandler<RpcStorage> {
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
                     nonce,
                     value,
-                    to_mint: value + U256::from(gas_price) * U256::from(gas_limit),
+                    to_mint,
                     refund_recipient: Address::default(),
                     input,
                     factory_deps: vec![],
