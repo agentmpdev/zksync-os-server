@@ -1,9 +1,10 @@
 use alloy::consensus::Sealed;
 use alloy::network::primitives::BlockTransactions;
-use alloy::primitives::{Address, B256, BlockHash, TxHash, U256};
+use alloy::primitives::{Address, B256, BlockHash, TxHash, U32, U64, U256};
 use alloy::rpc::types::Log;
 use jsonrpsee::core::Serialize;
 use serde::Deserialize;
+use zksync_os_merkle_tree_api::flat;
 use zksync_os_types::{BlockExt, ZkEnvelope, ZkReceiptEnvelope};
 
 pub type ZkTransactionReceipt =
@@ -109,4 +110,21 @@ impl From<L2ToL1Log> for zksync_os_types::L2ToL1Log {
             value: value.value,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateCommitmentPreimage {
+    pub next_free_slot: U64,
+    pub block_number: U32,
+    pub last_256_block_hashes_blake: B256,
+    pub last_block_timestamp: U64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchStorageProof {
+    pub address: Address,
+    pub state_commitment_preimage: StateCommitmentPreimage,
+    pub storage_proofs: Vec<flat::StorageSlotProof>,
 }

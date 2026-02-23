@@ -1,5 +1,5 @@
-use crate::types::{BlockMetadata, L2ToL1LogProof};
-use alloy::primitives::{Address, TxHash};
+use crate::types::{BatchStorageProof, BlockMetadata, L2ToL1LogProof};
+use alloy::primitives::{Address, B256, TxHash};
 use alloy::rpc::types::Index;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee::proc_macros::rpc;
@@ -29,4 +29,12 @@ pub trait ZksApi {
         &self,
         block_number: u64,
     ) -> RpcResult<Option<BlockMetadata>>;
+
+    #[method(name = "getProof")]
+    async fn get_proof(
+        &self,
+        account: Address,
+        keys: Vec<B256>,
+        batch_number: u64,
+    ) -> RpcResult<Option<BatchStorageProof>>;
 }

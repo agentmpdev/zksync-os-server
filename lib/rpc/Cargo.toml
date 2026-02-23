@@ -32,6 +32,7 @@ reth-rpc-eth-types.workspace = true
 alloy = { workspace = true, default-features = false, features = ["eips", "eip712", "dyn-abi", "rpc-types", "json-rpc"] }
 anyhow.workspace = true
 async-trait.workspace = true
+blake2.workspace = true
 dashmap.workspace = true
 futures.workspace = true
 jsonrpsee = { workspace = true, default-features = false, features = ["macros", "client"] }

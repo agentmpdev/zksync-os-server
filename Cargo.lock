@@ -14883,7 +14883,6 @@ dependencies = [
  "alloy",
  "basic_system 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=v0.2.7-interface-v0.0.13)",
  "blake2 0.10.6",
- "ruint",
  "serde",
  "thiserror 2.0.17",
  "zk_ee 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=v0.2.7-interface-v0.0.13)",
@@ -15467,6 +15466,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "basic_system 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=v0.2.7-interface-v0.0.13)",
+ "blake2 0.10.6",
  "boa_engine",
  "boa_gc",
  "dashmap",
@@ -15509,6 +15509,7 @@ dependencies = [
  "jsonrpsee",
  "serde",
  "zksync_os_genesis",
+ "zksync_os_merkle_tree_api",
  "zksync_os_types",
 ]
 
@@ -15773,7 +15774,6 @@ dependencies = [
  "anyhow",
  "auto_impl",
  "basic_system 0.1.0 (git+https://github.com/matter-labs/zksync-os?tag=v0.2.7-interface-v0.0.13)",
- "bincode 2.0.1",
  "futures",
  "pin-project 1.1.10",
  "semver 1.0.26",
