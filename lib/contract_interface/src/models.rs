@@ -163,6 +163,7 @@ pub struct CommitBatchInfo {
     pub last_block_number: Option<u64>,
     pub chain_id: u64,
     pub operator_da_input: Vec<u8>,
+    #[serde(default)]
     pub sl_chain_id: u64,
 }
 
