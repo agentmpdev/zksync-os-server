@@ -282,7 +282,6 @@ impl From<IExecutorV30::CommitBatchInfoZKsyncOS> for CommitBatchInfo {
             last_block_number: Some(value.lastBlockNumber),
             chain_id: value.chainId.to::<u64>(),
             operator_da_input: value.operatorDAInput.as_ref().to_vec(),
-            // todo: This might be wrong
             sl_chain_id: 0,
         }
     }
@@ -306,6 +305,7 @@ impl fmt::Debug for CommitBatchInfo {
             .field("first_block_timestamp", &self.first_block_timestamp)
             .field("last_block_timestamp", &self.last_block_timestamp)
             .field("chain_id", &self.chain_id)
+            .field("sl_chain_id", &self.sl_chain_id)
             // .field("operator_da_input", skipped to keep concise!)
             .finish()
     }

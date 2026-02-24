@@ -5,6 +5,7 @@ use alloy::{
     primitives::{Address, Bytes, FixedBytes, U256, address, keccak256},
     providers::utils::Eip1559Estimator,
     providers::{PendingTransactionBuilder, Provider},
+    rpc::types::TransactionRequest,
     sol,
     sol_types::{SolCall, SolType, SolValue},
 };
@@ -17,7 +18,7 @@ use zksync_os_integration_tests::{
     MultiChainTester, Tester, assert_traits::ReceiptAssert, contracts::TestERC20,
     provider::ZksyncApi,
 };
-use zksync_os_types::REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_BYTE;
+use zksync_os_types::{L1PriorityTxType, L1TxType, REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_BYTE};
 
 const L2_INTEROP_CENTER_ADDRESS: Address = address!("000000000000000000000000000000000001000d");
 const L2_INTEROP_HANDLER_ADDRESS: Address = address!("000000000000000000000000000000000001000e");
@@ -281,19 +282,18 @@ async fn fund_wallet_via_l1_deposit(tester: &Tester, wallet: Address, amount: U2
         }))
         .await?;
     let max_fee_per_gas = base_l1_fees_data.max_fee_per_gas + max_priority_fee_per_gas;
-    // TODO: fix gas estimation
-    // let gas_limit = tester
-    //     .l2_provider
-    //     .estimate_gas(
-    //         TransactionRequest::default()
-    //             .transaction_type(L1PriorityTxType::TX_TYPE)
-    //             .from(wallet)
-    //             .to(wallet)
-    //             .value(amount),
-    //     )
-    //     .await?;
-    let gas_limit = 10_000_000u64;
-    tracing::info!("gas_limit = {gas_limit}");
+    // TODO: gas estimation for L1 txs is most likely broken on zksync-os dev side, so we multiply by 2.
+    let gas_limit = tester
+        .l2_provider
+        .estimate_gas(
+            TransactionRequest::default()
+                .transaction_type(L1PriorityTxType::TX_TYPE)
+                .from(wallet)
+                .to(wallet)
+                .value(amount),
+        )
+        .await?
+        * 2;
 
     let tx_base_cost = bridgehub
         .l2_transaction_base_cost(
