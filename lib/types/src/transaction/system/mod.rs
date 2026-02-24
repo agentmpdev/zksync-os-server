@@ -38,21 +38,22 @@ impl PartialEq for SystemTxEnvelope {
 impl SystemTxEnvelope {
     /// A constructor for system transaction that imports interop roots
     pub fn import_interop_roots(roots: Vec<InteropRoot>) -> Self {
-        Self::create_from_input(SystemTxInput::ImportInteropRoots(roots))
+        // TODO: use proper salt for this tx subtype
+        Self::create_from_input(SystemTxInput::ImportInteropRoots(roots), 0)
     }
 
     /// A constructor for system transaction that sets the settlement layer chain id
-    pub fn set_sl_chain_id(chain_id: ChainId) -> Self {
-        Self::create_from_input(SystemTxInput::SetSLChainId(chain_id))
+    pub fn set_sl_chain_id(chain_id: ChainId, migration_number: u64) -> Self {
+        Self::create_from_input(SystemTxInput::SetSLChainId(chain_id), migration_number)
     }
 
-    fn create_from_input(tx_input: SystemTxInput) -> Self {
+    fn create_from_input(tx_input: SystemTxInput, salt: u64) -> Self {
         let calldata = tx_input.abi_encode();
 
         let transaction = SystemTx {
             to: tx_input.to_address(),
             input: Bytes::from(calldata),
-            salt: 0,
+            salt,
         };
 
         Self {
@@ -352,7 +353,7 @@ mod tests {
 
     #[test]
     fn set_sl_chain_id_tx_serialization() {
-        let tx = SystemTxEnvelope::set_sl_chain_id(1);
+        let tx = SystemTxEnvelope::set_sl_chain_id(1, 0);
 
         assert_eq!(
             serde_json::to_string_pretty(&tx).unwrap(),

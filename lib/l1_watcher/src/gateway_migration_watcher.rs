@@ -15,7 +15,9 @@ use zksync_os_types::SystemTxEnvelope;
 pub trait MigrationProcessor: Send + Sync + 'static {
     type Event: SolEvent + Send + Sync + 'static;
 
-    fn chain_id(event: Self::Event) -> ChainId;
+    fn chain_id(event: &Self::Event) -> ChainId;
+
+    fn migration_number(event: &Self::Event) -> u64;
 }
 
 pub struct Gateway;
@@ -25,16 +27,24 @@ pub struct L1;
 impl MigrationProcessor for Gateway {
     type Event = MigrateFromGateway;
 
-    fn chain_id(event: Self::Event) -> ChainId {
+    fn chain_id(event: &Self::Event) -> ChainId {
         event.chainId.try_into().unwrap()
+    }
+
+    fn migration_number(event: &Self::Event) -> u64 {
+        event.migrationNumber.try_into().unwrap()
     }
 }
 
 impl MigrationProcessor for L1 {
     type Event = MigrateToGateway;
 
-    fn chain_id(event: Self::Event) -> ChainId {
+    fn chain_id(event: &Self::Event) -> ChainId {
         event.chainId.try_into().unwrap()
+    }
+
+    fn migration_number(event: &Self::Event) -> u64 {
+        event.migrationNumber.try_into().unwrap()
     }
 }
 
@@ -82,7 +92,8 @@ impl<T: MigrationProcessor> ProcessL1Event for GatewayMigrationWatcher<T> {
     }
 
     async fn process_event(&mut self, tx: T::Event, _log: Log) -> Result<(), L1WatcherError> {
-        let envelope = SystemTxEnvelope::set_sl_chain_id(T::chain_id(tx));
+        let envelope =
+            SystemTxEnvelope::set_sl_chain_id(T::chain_id(&tx), T::migration_number(&tx));
 
         self.output
             .send(envelope)
