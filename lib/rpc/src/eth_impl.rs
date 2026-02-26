@@ -347,7 +347,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Me
         if block_count == 0 {
             return Ok(L2FeeHistory {
                 base: Default::default(),
-                l2_pubdata_price: Some(vec![]),
+                pubdata_price_per_byte: Some(vec![]),
             });
         }
         if newest_block.is_pending() {
@@ -388,7 +388,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Me
         let start_block = end_block_plus - block_count;
 
         let mut base_fee_per_gas = Vec::with_capacity(block_count as usize + 1);
-        let mut l2_pubdata_price = Vec::with_capacity(block_count as usize);
+        let mut pubdata_price_per_byte = Vec::with_capacity(block_count as usize);
         for block in start_block..=end_block {
             let (base_fee, pubdata_price) = self
                 .storage
@@ -399,7 +399,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Me
                     BlockNumberOrTag::Number(block),
                 )))?;
             base_fee_per_gas.push(base_fee.saturating_to());
-            l2_pubdata_price.push(pubdata_price);
+            pubdata_price_per_byte.push(pubdata_price);
         }
         if let Some(base_fee) = self
             .storage
@@ -432,7 +432,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Me
 
         Ok(L2FeeHistory {
             base,
-            l2_pubdata_price: Some(l2_pubdata_price),
+            pubdata_price_per_byte: Some(pubdata_price_per_byte),
         })
     }
 }

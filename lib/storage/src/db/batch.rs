@@ -2,10 +2,9 @@ use crate::metrics::BATCH_STORAGE_METRICS;
 use alloy::primitives::BlockNumber;
 use anyhow::Context;
 use std::path::Path;
-use zksync_os_batch_types::DiscoveredCommittedBatch;
 use zksync_os_rocksdb::RocksDB;
 use zksync_os_rocksdb::db::{NamedColumnFamily, WriteBatch as RocksdbWriteBatch};
-use zksync_os_storage_api::{ReadBatch, WriteBatch};
+use zksync_os_storage_api::{PersistedBatch, ReadBatch, WriteBatch};
 
 #[derive(Clone, Debug)]
 pub struct ExecutedBatchStorage {
@@ -19,8 +18,6 @@ pub enum ExecutedBatchColumnFamily {
     BatchInfo,
     /// block_number (be) => batch number which block range starts with this block (be)
     FirstBlockIndex,
-    /// batch_number (be) => execute_sl_block_number (be)
-    ExecuteSLBlockNumber,
     /// Stores the latest appended batch number under a fixed key.
     Latest,
 }
@@ -30,7 +27,6 @@ impl NamedColumnFamily for ExecutedBatchColumnFamily {
     const ALL: &'static [Self] = &[
         ExecutedBatchColumnFamily::BatchInfo,
         ExecutedBatchColumnFamily::FirstBlockIndex,
-        ExecutedBatchColumnFamily::ExecuteSLBlockNumber,
         ExecutedBatchColumnFamily::Latest,
     ];
 
@@ -38,7 +34,6 @@ impl NamedColumnFamily for ExecutedBatchColumnFamily {
         match self {
             ExecutedBatchColumnFamily::BatchInfo => "batch_info",
             ExecutedBatchColumnFamily::FirstBlockIndex => "first_block_index",
-            ExecutedBatchColumnFamily::ExecuteSLBlockNumber => "execute_sl_block_number",
             ExecutedBatchColumnFamily::Latest => "latest",
         }
     }
@@ -56,15 +51,10 @@ impl ExecutedBatchStorage {
         Self { db }
     }
 
-    fn write_batch_unchecked(
-        &self,
-        executed_batch: DiscoveredCommittedBatch,
-        execute_sl_block_number: u64,
-    ) {
+    fn write_batch_unchecked(&self, executed_batch: PersistedBatch) {
         let persist_latency_observer = BATCH_STORAGE_METRICS.persist_latency.start();
         let batch_number_key = executed_batch.number().to_be_bytes().to_vec();
         let first_block_number_key = executed_batch.first_block_number().to_be_bytes().to_vec();
-        let execute_sl_block_number_value = execute_sl_block_number.to_be_bytes().to_vec();
         let batch_info_value = serde_json::to_vec(&executed_batch)
             .expect("failed to serialize DiscoveredCommittedBatch");
         let mut batch: RocksdbWriteBatch<'_, ExecutedBatchColumnFamily> = self.db.new_write_batch();
@@ -83,11 +73,6 @@ impl ExecutedBatchStorage {
             &first_block_number_key,
             &batch_number_key,
         );
-        batch.put_cf(
-            ExecutedBatchColumnFamily::ExecuteSLBlockNumber,
-            &batch_number_key,
-            &execute_sl_block_number_value,
-        );
         BATCH_STORAGE_METRICS
             .data_size
             .observe(batch.size_in_bytes());
@@ -105,7 +90,7 @@ impl ReadBatch for ExecutedBatchStorage {
     fn get_batch_by_block_number(
         &self,
         block_number: BlockNumber,
-    ) -> anyhow::Result<Option<DiscoveredCommittedBatch>> {
+    ) -> anyhow::Result<Option<PersistedBatch>> {
         let block_key = block_number.to_be_bytes();
 
         let mut iter = self.db.to_iterator_cf(
@@ -129,10 +114,7 @@ impl ReadBatch for ExecutedBatchStorage {
         }
     }
 
-    fn get_batch_by_number(
-        &self,
-        batch_number: u64,
-    ) -> anyhow::Result<Option<DiscoveredCommittedBatch>> {
+    fn get_batch_by_number(&self, batch_number: u64) -> anyhow::Result<Option<PersistedBatch>> {
         let batch_key = batch_number.to_be_bytes();
         let Some(bytes) = self
             .db
@@ -143,26 +125,6 @@ impl ReadBatch for ExecutedBatchStorage {
         };
 
         serde_json::from_slice(&bytes).context("failed to deserialize context")
-    }
-
-    fn get_execute_sl_block_number_by_batch_number(
-        &self,
-        batch_number: u64,
-    ) -> anyhow::Result<Option<u64>> {
-        let batch_key = batch_number.to_be_bytes();
-        let Some(bytes) = self
-            .db
-            .get_cf(ExecutedBatchColumnFamily::BatchInfo, &batch_key)
-            .context("cannot read from DB")?
-        else {
-            return Ok(None);
-        };
-
-        let arr: [u8; 8] = bytes
-            .as_slice()
-            .try_into()
-            .context("invalid execute_sl_block_number value")?;
-        Ok(Some(u64::from_be_bytes(arr)))
     }
 
     fn latest_batch(&self) -> u64 {
@@ -179,7 +141,7 @@ impl ReadBatch for ExecutedBatchStorage {
 }
 
 impl WriteBatch for ExecutedBatchStorage {
-    fn write(&self, batch: DiscoveredCommittedBatch, execute_sl_block_number: u64) {
-        self.write_batch_unchecked(batch, execute_sl_block_number)
+    fn write(&self, batch: PersistedBatch) {
+        self.write_batch_unchecked(batch)
     }
 }

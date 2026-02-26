@@ -3,10 +3,9 @@ use crate::result::ToRpcResult;
 use alloy::primitives::{B256, BlockNumber, TxHash};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use zksync_os_batch_types::DiscoveredCommittedBatch;
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
 use zksync_os_rpc_api::unstable::UnstableApiServer;
-use zksync_os_storage_api::RepositoryError;
+use zksync_os_storage_api::{PersistedBatch, RepositoryError};
 use zksync_os_types::L2_TO_L1_TREE_SIZE;
 
 pub struct UnstableNamespace<RpcStorage> {
@@ -20,10 +19,7 @@ impl<RpcStorage> UnstableNamespace<RpcStorage> {
 }
 
 impl<RpcStorage: ReadRpcStorage> UnstableNamespace<RpcStorage> {
-    fn get_batch_by_block_number_impl(
-        &self,
-        block_number: u64,
-    ) -> UnstableResult<DiscoveredCommittedBatch> {
+    fn get_batch_by_block_number_impl(&self, block_number: u64) -> UnstableResult<PersistedBatch> {
         self.storage
             .batch()
             .get_batch_by_block_number(block_number)?
@@ -67,10 +63,7 @@ impl<RpcStorage: ReadRpcStorage> UnstableNamespace<RpcStorage> {
 
 #[async_trait]
 impl<RpcStorage: ReadRpcStorage> UnstableApiServer for UnstableNamespace<RpcStorage> {
-    async fn get_batch_by_block_number(
-        &self,
-        block_number: u64,
-    ) -> RpcResult<DiscoveredCommittedBatch> {
+    async fn get_batch_by_block_number(&self, block_number: u64) -> RpcResult<PersistedBatch> {
         self.get_batch_by_block_number_impl(block_number)
             .to_rpc_result()
     }

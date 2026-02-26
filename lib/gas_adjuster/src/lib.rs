@@ -27,7 +27,7 @@ mod statistics;
 pub struct GasAdjuster {
     base_fee_statistics: GasStatistics<u128>,
     blob_base_fee_statistics: GasStatistics<u128>,
-    l2_pubdata_price_statistics: GasStatistics<U256>,
+    gw_pubdata_price_statistics: GasStatistics<U256>,
     blob_fill_ratio_statistics: Statistics<Ratio<u64>>,
 
     config: GasAdjusterConfig,
@@ -79,16 +79,18 @@ impl GasAdjuster {
             fee_history.iter().map(|fee| fee.base_fee_per_blob_gas),
         );
 
-        let l2_pubdata_price_statistics = GasStatistics::new(
+        let gw_pubdata_price_statistics = GasStatistics::new(
             config.max_base_fee_samples,
             current_block,
-            fee_history.iter().filter_map(|fee| fee.l2_pubdata_price),
+            fee_history
+                .iter()
+                .filter_map(|fee| fee.pubdata_price_per_byte),
         );
 
         let this = Self {
             base_fee_statistics,
             blob_base_fee_statistics,
-            l2_pubdata_price_statistics,
+            gw_pubdata_price_statistics,
             blob_fill_ratio_statistics: Statistics::new(config.max_blob_fill_ratio_samples),
             config,
             sl_provider,
@@ -159,25 +161,25 @@ impl GasAdjuster {
                     .set(self.blob_base_fee_statistics.median() as u64);
             }
 
-            if let Some(current_l2_pubdata_price) =
-                fee_data.last().and_then(|fee| fee.l2_pubdata_price)
+            if let Some(current_pubdata_price_per_byte) =
+                fee_data.last().and_then(|fee| fee.pubdata_price_per_byte)
             {
-                if current_l2_pubdata_price > U256::from(u64::MAX) {
+                if current_pubdata_price_per_byte > U256::from(u64::MAX) {
                     tracing::info!(
-                        "Failed to report current_l2_pubdata_price = {current_l2_pubdata_price}, it exceeds u64::MAX"
+                        "Failed to report current_pubdata_price_per_byte = {current_pubdata_price_per_byte}, it exceeds u64::MAX"
                     );
                 } else {
                     METRICS
-                        .current_l2_pubdata_price
-                        .set(current_l2_pubdata_price.to());
+                        .current_pubdata_price_per_byte
+                        .set(current_pubdata_price_per_byte.to());
                 }
             }
-            self.l2_pubdata_price_statistics
-                .add_samples(fee_data.iter().filter_map(|fee| fee.l2_pubdata_price));
-            if self.l2_pubdata_price_statistics.median() <= U256::from(u64::MAX) {
+            self.gw_pubdata_price_statistics
+                .add_samples(fee_data.iter().filter_map(|fee| fee.pubdata_price_per_byte));
+            if self.gw_pubdata_price_statistics.median() <= U256::from(u64::MAX) {
                 METRICS
-                    .median_l2_pubdata_price
-                    .set(self.l2_pubdata_price_statistics.median().to());
+                    .median_pubdata_price_per_byte
+                    .set(self.gw_pubdata_price_statistics.median().to());
             }
 
             self.pubdata_price_sender
@@ -261,7 +263,7 @@ impl GasAdjuster {
                 U256::from(self.gas_price()).saturating_mul(U256::from(L1_GAS_PER_PUBDATA_BYTE))
             }
             PubdataMode::Validium => U256::from(0u32),
-            PubdataMode::RelayedL2Calldata => self.l2_pubdata_price_statistics.median(),
+            PubdataMode::RelayedL2Calldata => self.gw_pubdata_price_statistics.median(),
         };
 
         if price <= U256::from(u128::MAX) {
@@ -320,23 +322,23 @@ impl GasAdjuster {
                 );
             }
 
-            let l2_pubdata_price = fee_history
-                .l2_pubdata_price
+            let pubdata_price_per_byte = fee_history
+                .pubdata_price_per_byte
                 .map(|v| v.into_iter().map(Some).collect())
                 .unwrap_or_else(|| vec![None; chunk_size as usize]);
             // We take `chunk_size` entries and drop data for the block after `chunk_end`.
-            for ((base_fee_per_gas, base_fee_per_blob_gas), l2_pubdata_price) in fee_history
+            for ((base_fee_per_gas, base_fee_per_blob_gas), pubdata_price_per_byte) in fee_history
                 .base
                 .base_fee_per_gas
                 .into_iter()
                 .zip(fee_history.base.base_fee_per_blob_gas)
-                .zip(l2_pubdata_price)
+                .zip(pubdata_price_per_byte)
                 .take(chunk_size as usize)
             {
                 let fees = BaseFees {
                     base_fee_per_gas,
                     base_fee_per_blob_gas,
-                    l2_pubdata_price,
+                    pubdata_price_per_byte,
                 };
                 history.push(fees)
             }
@@ -351,5 +353,5 @@ impl GasAdjuster {
 pub struct BaseFees {
     pub base_fee_per_gas: u128,
     pub base_fee_per_blob_gas: u128,
-    pub l2_pubdata_price: Option<U256>,
+    pub pubdata_price_per_byte: Option<U256>,
 }

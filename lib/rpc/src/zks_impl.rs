@@ -9,11 +9,10 @@ use async_trait::async_trait;
 use futures::{FutureExt, TryFutureExt};
 use jsonrpsee::core::RpcResult;
 use std::sync::Arc;
-use zksync_os_batch_types::DiscoveredCommittedBatch;
 use zksync_os_genesis::{GenesisInput, GenesisInputSource};
 use zksync_os_mini_merkle_tree::MiniMerkleTree;
 use zksync_os_rpc_api::{types::BlockMetadata, types::L2ToL1LogProof, zks::ZksApiServer};
-use zksync_os_storage_api::{RepositoryError, StateError, read_aggregated_root};
+use zksync_os_storage_api::{PersistedBatch, RepositoryError, StateError, read_aggregated_root};
 use zksync_os_types::L2_TO_L1_TREE_SIZE;
 
 const LOG_PROOF_SUPPORTED_METADATA_VERSION: u8 = 1;
@@ -100,14 +99,17 @@ impl<RpcStorage: ReadRpcStorage> ZksNamespace<RpcStorage> {
                 .merkle_root_and_path(l1_log_index);
 
         let state = self.storage.state_view_at(*batch.block_range.end())?;
-        let root_pre_v31 = keccak256([local_root.0, [0u8; 32]].concat());
-        let (aggregated_root, root) = if batch.batch_info.l2_to_l1_logs_root_hash == root_pre_v31 {
-            (B256::new([0u8; 32]), root_pre_v31)
+        let last_block_replay_record = self
+            .storage
+            .replay_storage()
+            .get_replay_record(*batch.block_range.end())
+            .ok_or(ZksError::BlockNotAvailable(*batch.block_range.end()))?;
+        let aggregated_root = if last_block_replay_record.protocol_version.is_post_v31() {
+            read_aggregated_root(state)
         } else {
-            let aggregated_root = read_aggregated_root(state);
-            let root = keccak256([local_root.0, aggregated_root.0].concat());
-            (aggregated_root, root)
+            B256::new([0u8; 32])
         };
+        let root = keccak256([local_root.0, aggregated_root.0].concat());
 
         let log_leaf_proof = proof
             .into_iter()
@@ -116,12 +118,10 @@ impl<RpcStorage: ReadRpcStorage> ZksNamespace<RpcStorage> {
 
         let (batch_proof_len, batch_chain_proof, is_final_node) = match &self.gateway_provider {
             Some(gateway_provider) => {
-                let execute_sl_block_number = self
-                    .storage
-                    .batch()
-                    .get_execute_sl_block_number_by_batch_number(batch.number())?
+                let execute_sl_block_number = batch
+                    .execute_sl_block_number
                     .ok_or(ZksError::BatchNotAvailableYet)?;
-                let gateway_batch: DiscoveredCommittedBatch = gateway_provider
+                let gateway_batch: PersistedBatch = gateway_provider
                     .raw_request(
                         "unstable_getBatchByBlockNumber".into(),
                         execute_sl_block_number,
@@ -161,7 +161,7 @@ impl<RpcStorage: ReadRpcStorage> ZksNamespace<RpcStorage> {
                 });
 
                 let batch_tree_proof_future = batch_tree_proof(
-                    gateway_batch.block_range,
+                    gateway_batch.block_range.clone(),
                     self.l2_chain_id,
                     batch_number,
                     gateway_provider,
