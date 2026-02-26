@@ -114,17 +114,23 @@ impl From<L2ToL1Log> for zksync_os_types::L2ToL1Log {
     }
 }
 
+/// Data hashed into the state commitment of the batch together with the Merkle tree root hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateCommitmentPreimage {
+    /// Number of leaves in the Merkle tree.
     pub next_free_slot: U64,
+    /// Number of the last block in the batch.
     pub block_number: U64,
+    /// Linear Blake2s-256 hash of the last 256 block hashes ending with `block_number` (inclusive).
     pub last_256_block_hashes_blake: B256,
+    /// Timestamp (in seconds) of the last block in the batch.
     pub last_block_timestamp: U64,
 }
 
 impl StateCommitmentPreimage {
-    /// Hashes this preimage together with the provided state commitment, resulting the state commitment hash.
+    /// Hashes this preimage together with the provided Merkle tree root hash, resulting the state commitment hash
+    /// recorded on L1 (accessible e.g. via `BlockCommit` event emitted by the diamond proxy).
     pub fn hash(&self, tree_root_hash: B256) -> B256 {
         let mut hasher = Blake2s256::new();
         hasher.update(tree_root_hash.as_slice());
@@ -136,11 +142,16 @@ impl StateCommitmentPreimage {
     }
 }
 
+/// Storage proof returned from the `zks_getProof` RPC method. Rooted in the batch hash recorded on L1.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchStorageProof {
+    /// Queried address (duplicated to make the proof self-sufficient).
     pub address: Address,
+    /// State commitment preimage data, excluding the Merkle tree root hash (which can be recovered from
+    /// `storage_proofs`).
     pub state_commitment_preimage: StateCommitmentPreimage,
+    /// Flat storage proofs for each queried key.
     pub storage_proofs: Vec<flat::StorageSlotProof>,
 }
 
@@ -148,7 +159,7 @@ impl BatchStorageProof {
     const TREE_DEPTH: u8 = 64;
 
     // There's a similar function in `zk_ee`, but it relies on multiple unstable features.
-    pub fn derive_flat_key(address: Address, key: B256) -> B256 {
+    fn derive_flat_key(address: Address, key: B256) -> B256 {
         let mut hasher = Blake2s256::new();
         hasher.update([0_u8; 12]); // address padding
         hasher.update(address.0);

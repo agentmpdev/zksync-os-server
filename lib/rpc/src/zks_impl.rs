@@ -213,9 +213,8 @@ impl<RpcStorage: ReadRpcStorage> ZksNamespace<RpcStorage> {
         let flat_keys: Vec<_> = keys
             .iter()
             .map(|account_key| {
-                B256::new(
-                    derive_flat_storage_key(&address_for_keys, &account_key.0.into()).as_u8_array(),
-                )
+                let flat_key = derive_flat_storage_key(&address_for_keys, &account_key.0.into());
+                B256::new(flat_key.as_u8_array())
             })
             .collect();
         // We query tree version by the *block* number because the tree is updated on each block,
