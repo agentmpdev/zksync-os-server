@@ -1,6 +1,3 @@
-general:
-  ephemeral: true
-  ephemeral_state: ./local-chains/v31.0/gateway-state.tar.gz
 genesis:
   bridgehub_address: '0x0f5e414d8387c827d5478c6f424134c004e75037'
   bytecode_supplier_address: '0x3d5882afb534e1ddd582e00f4047730fdc9e857c'
