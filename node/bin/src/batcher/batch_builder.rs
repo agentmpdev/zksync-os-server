@@ -10,6 +10,7 @@ use zksync_os_storage_api::{ReadStateHistory, ReplayRecord, read_aggregated_root
 use zksync_os_types::{ProvingVersion, PubdataMode};
 
 /// Takes a vector of blocks and produces a batch envelope.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn seal_batch<ReadState: ReadStateHistory>(
     blocks: &[(
         BlockOutput,

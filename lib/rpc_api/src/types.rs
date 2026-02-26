@@ -61,7 +61,7 @@ pub struct BlockMetadata {
 pub struct L2FeeHistory {
     #[serde(flatten)]
     pub base: FeeHistory,
-    pub l2_pubdata_price: Option<Vec<U256>>,
+    pub pubdata_price_per_byte: Option<Vec<U256>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
