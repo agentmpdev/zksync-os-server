@@ -509,7 +509,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         if node_startup_state.l1_state.l1_chain_id != node_startup_state.l1_state.sl_chain_id {
             tasks.spawn(
                 GatewayMigrationWatcher::<Gateway>::create_watcher(
-                    node_startup_state.l1_state.diamond_proxy_l1.clone(),
+                    node_startup_state.l1_state.diamond_proxy_sl.clone(),
                     node_startup_state.l1_state.bridgehub_sl.clone(),
                     chain_id,
                     next_migration_number,
@@ -524,7 +524,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         } else {
             tasks.spawn(
                 GatewayMigrationWatcher::<L1>::create_watcher(
-                    node_startup_state.l1_state.diamond_proxy_l1.clone(),
+                    node_startup_state.l1_state.diamond_proxy_sl.clone(),
                     node_startup_state.l1_state.bridgehub_sl.clone(),
                     chain_id,
                     next_migration_number,
