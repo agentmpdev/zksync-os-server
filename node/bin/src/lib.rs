@@ -505,9 +505,8 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     if current_protocol_version >= ProtocolSemanticVersion::new(0, 31, 0)
         && config.l1_watcher_config.enable_gw_migration_watcher
     {
-        // todo: add proper handling of gateway migration watcher/differentiating between gateway and l1
-        let is_gateway = false;
-        if is_gateway {
+        // in case l1 chain id is not equal to sl chain id(which indicates we are currently settling on GW), we watch for migration events of type GW -> L1, and L1 -> GW otherwise.
+        if node_startup_state.l1_state.l1_chain_id != node_startup_state.l1_state.sl_chain_id {
             tasks.spawn(
                 GatewayMigrationWatcher::<Gateway>::create_watcher(
                     node_startup_state.l1_state.diamond_proxy_l1.clone(),
