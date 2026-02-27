@@ -165,7 +165,7 @@ impl<T: L2Subpool> Pool<T> {
                     SystemTxType::ImportInteropRoots(_) => {
                         interop_txs.push(system_tx);
                     }
-                    SystemTxType::SetSLChainId => {
+                    SystemTxType::SetSLChainId(_) => {
                         sl_chain_id_txs.push(system_tx);
                     }
                 },
