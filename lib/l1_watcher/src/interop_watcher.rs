@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use alloy::primitives::ChainId;
 use alloy::rpc::types::{Log, Topic, ValueOrArray};
 use alloy::sol_types::SolEvent;
 use alloy::{primitives::Address, providers::DynProvider};
-use zksync_os_contract_interface::IMessageRoot::NewInteropRoot;
+use zksync_os_contract_interface::IMessageRoot::{AppendedChainRoot, NewInteropRoot};
 use zksync_os_contract_interface::{Bridgehub, InteropRoot};
 use zksync_os_mempool::subpools::interop_roots::InteropRootsSubpool;
 use zksync_os_types::{IndexedInteropRoot, InteropRootsLogIndex};
@@ -13,6 +14,7 @@ use crate::{L1WatcherConfig, ProcessRawEvents};
 
 pub struct InteropWatcher {
     contract_address: Address,
+    chain_id: ChainId,
     starting_interop_event_index: InteropRootsLogIndex,
     interop_roots_subpool: InteropRootsSubpool,
 }
@@ -34,6 +36,7 @@ impl InteropWatcher {
 
         let this = Self {
             contract_address,
+            chain_id: bridgehub.l2_chain_id,
             starting_interop_event_index,
             interop_roots_subpool,
         };
@@ -57,7 +60,7 @@ impl ProcessRawEvents for InteropWatcher {
     }
 
     fn event_signatures(&self) -> Topic {
-        NewInteropRoot::SIGNATURE_HASH.into()
+        Topic::from(NewInteropRoot::SIGNATURE_HASH).extend(AppendedChainRoot::SIGNATURE_HASH)
     }
 
     fn contract_addresses(&self) -> ValueOrArray<Address> {
@@ -69,41 +72,79 @@ impl ProcessRawEvents for InteropWatcher {
         let mut indexes = HashMap::new();
 
         for log in logs {
-            let sol_event = NewInteropRoot::decode_log(&log.inner)
-                .expect("failed to decode log")
-                .data;
-            indexes.insert(sol_event.blockNumber, log);
+            if log.topic0() == Some(&NewInteropRoot::SIGNATURE_HASH) {
+                let sol_event = NewInteropRoot::decode_log(&log.inner)
+                    .expect("failed to decode log")
+                    .data;
+                indexes.insert(sol_event.blockNumber, log);
+            } else if log.topic0() == Some(&AppendedChainRoot::SIGNATURE_HASH) {
+                let sol_event = AppendedChainRoot::decode_log(&log.inner)
+                    .expect("failed to decode log")
+                    .data;
+                indexes.insert(sol_event.batchNumber, log);
+            } else {
+                panic!("unexpected log type");
+            }
         }
 
         indexes.into_values().collect()
     }
 
     async fn process_raw_event(&mut self, log: Log) -> Result<(), L1WatcherError> {
-        let event = NewInteropRoot::decode_log(&log.inner)?.data;
-
         let event_log_index = InteropRootsLogIndex {
             block_number: log.block_number.unwrap(),
             index_in_block: log.log_index.unwrap(),
         };
-
-        if event_log_index < self.starting_interop_event_index {
-            tracing::debug!(
-                log_id = ?event.logId,
-                starting_interop_event_index = ?self.starting_interop_event_index,
-                "skipping interop root event before starting index",
-            );
+        let interop_root = if log.topic0() == Some(&NewInteropRoot::SIGNATURE_HASH) {
+            let event = NewInteropRoot::decode_log(&log.inner)?.data;
+            if event_log_index < self.starting_interop_event_index {
+                tracing::debug!(
+                    log_id = ?event.logId,
+                    starting_interop_event_index = ?self.starting_interop_event_index,
+                    "skipping interop root event before starting index",
+                );
+                return Ok(());
+            }
+            InteropRoot {
+                chainId: event.chainId,
+                blockOrBatchNumber: event.blockNumber,
+                sides: event.sides.clone(),
+            }
+        } else if log.topic0() == Some(&AppendedChainRoot::SIGNATURE_HASH) {
+            let event = AppendedChainRoot::decode_log(&log.inner)?.data;
+            if event_log_index < self.starting_interop_event_index {
+                tracing::debug!(
+                    starting_interop_event_index = ?self.starting_interop_event_index,
+                    "skipping interop root event before starting index",
+                );
+                return Ok(());
+            }
+            InteropRoot {
+                chainId: event.chainId,
+                blockOrBatchNumber: event.batchNumber,
+                sides: vec![event.chainRoot],
+            }
+        } else {
+            panic!("unexpected log type");
+        };
+        if interop_root.chainId == self.chain_id {
+            tracing::info!("skipping own root import");
             return Ok(());
         }
-        let interop_root = InteropRoot {
-            chainId: event.chainId,
-            blockOrBatchNumber: event.blockNumber,
-            sides: event.sides.clone(),
-        };
 
-        self.interop_roots_subpool.add_root(IndexedInteropRoot {
-            log_index: event_log_index,
-            root: interop_root,
-        }).await;
+        tracing::info!(
+            "discovered interop root: chain_id={}, block_number={}, root={:?}",
+            interop_root.chainId,
+            interop_root.blockOrBatchNumber,
+            interop_root.sides,
+        );
+
+        self.interop_roots_subpool
+            .add_root(IndexedInteropRoot {
+                log_index: event_log_index,
+                root: interop_root,
+            })
+            .await;
         Ok(())
     }
 }

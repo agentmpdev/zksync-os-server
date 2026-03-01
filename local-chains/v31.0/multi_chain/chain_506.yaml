@@ -1,6 +1,6 @@
 general:
   ephemeral: true
-  ephemeral_state: ./local-chains/v31.0/gateway-state.tar.gz
+  ephemeral_state: /home/itegulov/Work/zksync-os-server/local-chains/v31.0/gateway-state.tar.gz
 genesis:
   bridgehub_address: '0xa0e2664d55ca009df3752898edcdd230f79655b7'
   bytecode_supplier_address: '0xcdae13c99475f0b40c4ac1ddfde8c6d06a214588'

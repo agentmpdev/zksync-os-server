@@ -14,8 +14,8 @@ use alloy::consensus::{BlobTransactionValidationError, EnvKzgSettings};
 use alloy::eips::eip7594::BlobTransactionSidecarVariant;
 use alloy::eips::{BlockId, Encodable2718};
 use alloy::network::{Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844};
-use alloy::primitives::Address;
 use alloy::primitives::utils::{format_ether, format_units};
+use alloy::primitives::{Address, ChainId};
 use alloy::providers::ext::DebugApi;
 use alloy::providers::fillers::{FillProvider, TxFiller};
 use alloy::providers::{PendingTransactionError, Provider, WalletProvider};
@@ -73,6 +73,7 @@ pub async fn run_l1_sender<Input: SendToL1>(
     >,
     config: L1SenderConfig<Input>,
     gateway: bool,
+    chain_id: ChainId,
 ) -> anyhow::Result<()> {
     let latency_tracker =
         ComponentStateReporter::global().handle_for(Input::NAME, L1SenderState::WaitingRecv);
@@ -134,9 +135,9 @@ pub async fn run_l1_sender<Input: SendToL1>(
                         config.max_fee_per_gas_wei,
                         config.max_priority_fee_per_gas_wei,
                     )
-                    .await?
-                    .with_to(to_address)
-                    .with_input(cmd.solidity_call(gateway));
+                        .await?
+                        .with_to(to_address)
+                        .with_input(cmd.solidity_call(gateway));
 
                     if let Some(blob_sidecar) = cmd.blob_sidecar() {
                         let fee_per_blob_gas = provider.get_blob_base_fee().await?;
@@ -208,7 +209,7 @@ pub async fn run_l1_sender<Input: SendToL1>(
         let mut completed_commands = Vec::with_capacity(pending_txs.len());
         for (receipt_fut, command) in pending_txs {
             let receipt = receipt_fut.await?;
-            validate_tx_receipt(&provider, &command, receipt).await?;
+            validate_tx_receipt(&provider, &command, receipt, chain_id).await?;
             completed_commands.push(command);
         }
 
@@ -354,14 +355,18 @@ async fn validate_tx_receipt<Input: SendToL1>(
     provider: &impl Provider,
     command: &Input,
     receipt: TransactionReceipt,
+    chain_id: ChainId,
 ) -> anyhow::Result<()> {
     if receipt.status() {
         // Transaction succeeded - log output and return OK(())
         L1_SENDER_METRICS.report_tx_receipt(command, receipt)?;
         Ok(())
     } else {
+        let sl_chain_id = provider.get_chain_id().await.expect("chain id");
         tracing::error!(
             %command,
+            chain_id,
+            sl_chain_id,
             tx_hash = ?receipt.transaction_hash,
             l1_block_number = receipt.block_number.unwrap(),
             "Transaction failed on L1",

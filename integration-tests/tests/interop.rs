@@ -346,7 +346,7 @@ async fn test_interop_bundle_send() -> Result<()> {
     // This test validates the first part of the interop flow:
     // setting up two chains and sending an interop bundle from chain A to chain B
 
-    let multi_chain = MultiChainTester::setup(2).await?;
+    let multi_chain = MultiChainTester::setup(3).await?;
 
     let chain_a = multi_chain.chain_a();
     let chain_b = multi_chain.chain_b();
@@ -354,12 +354,17 @@ async fn test_interop_bundle_send() -> Result<()> {
     let chain_a_id = chain_a.l2_provider.get_chain_id().await?;
     let chain_b_id = chain_b.l2_provider.get_chain_id().await?;
 
+    println!("chain_a_id: {}", chain_a_id);
+    println!("chain_b_id: {}", chain_b_id);
+
     let sender = chain_a.l2_wallet.default_signer().address();
 
     // Fund sender wallet on both chains via L1 deposits
     let deposit_amount = U256::from(1000) * U256::from(10).pow(U256::from(18)); // 1000 ETH
     fund_wallet_via_l1_deposit(chain_a, sender, deposit_amount).await?;
     fund_wallet_via_l1_deposit(chain_b, sender, deposit_amount).await?;
+
+    println!("FUNDED");
 
     let (token, _initial_supply, asset_id) =
         setup_token_on_chain_a(&chain_a.l2_provider, sender).await?;
@@ -376,6 +381,8 @@ async fn test_interop_bundle_send() -> Result<()> {
         .expect_successful_receipt()
         .await?;
 
+    println!("APPROVED");
+
     // Build interop bundle
     let second_bridge_calldata = build_second_bridge_calldata(
         asset_id,
@@ -384,6 +391,8 @@ async fn test_interop_bundle_send() -> Result<()> {
         Address::ZERO, // maybeTokenAddress = 0
     );
 
+    println!("BUILT SECOND BRIDGE CALLDATA");
+
     // Build call attributes with indirectCall
     let call_attributes = vec![Bytes::from(
         indirectCallCall {
@@ -391,6 +400,8 @@ async fn test_interop_bundle_send() -> Result<()> {
         }
         .abi_encode(),
     )];
+
+    println!("CALL ATTRIBUTES");
 
     let to_address = format_evm_v1_address_only(L2_ASSET_ROUTER_ADDRESS);
 
@@ -412,6 +423,8 @@ async fn test_interop_bundle_send() -> Result<()> {
     let interop_center = IInteropCenter::new(L2_INTEROP_CENTER_ADDRESS, &chain_a.l2_provider);
     let destination_chain_id = format_evm_v1(chain_b_id);
 
+    println!("SENDING BUNDLE");
+
     // Send sendBundle transaction
     let receipt = interop_center
         .sendBundle(destination_chain_id.clone(), calls, bundle_attributes)
@@ -426,9 +439,13 @@ async fn test_interop_bundle_send() -> Result<()> {
         .await
         .context("sendBundle on chain A")?;
 
+    println!("SENT BUNDLE");
+
     // Extract bundle data from the L1Messenger log (log #3)
     let l1_messenger_log = receipt.logs().get(3).expect("L1Messenger log not found");
     assert_eq!(l1_messenger_log.address(), L1_MESSENGER_ADDRESS.as_slice());
+
+    println!("ASSERTED L1 MESSENGER LOG");
 
     // Decode the log data as bytes (it's ABI-encoded)
     let bundle_with_prefix: Bytes =

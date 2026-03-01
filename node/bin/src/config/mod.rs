@@ -359,7 +359,7 @@ pub struct SequencerConfig {
 
     /// Delay between 2 consecutive service blocks.
     /// Defaults to 3 times of usual block time, to allow passing other transactions in between
-    #[config(default_t = Duration::from_millis(750))]
+    #[config(default_t = Duration::from_millis(10000))]
     pub service_block_delay: Duration,
 
     /// Enable REVM consistency checker.

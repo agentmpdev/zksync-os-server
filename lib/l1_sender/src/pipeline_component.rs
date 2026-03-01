@@ -3,7 +3,7 @@ use crate::commands::{L1SenderCommand, SendToL1};
 use crate::config::L1SenderConfig;
 use crate::run_l1_sender;
 use alloy::network::{Ethereum, EthereumWallet};
-use alloy::primitives::Address;
+use alloy::primitives::{Address, ChainId};
 use alloy::providers::fillers::{FillProvider, TxFiller};
 use alloy::providers::{Provider, WalletProvider};
 use async_trait::async_trait;
@@ -17,6 +17,7 @@ pub struct L1Sender<F: TxFiller<Ethereum>, P: Provider<Ethereum>, C> {
     pub config: L1SenderConfig<C>,
     pub to_address: Address,
     pub gateway: bool,
+    pub chain_id: ChainId,
 }
 
 #[async_trait]
@@ -44,6 +45,7 @@ where
             self.provider,
             self.config,
             self.gateway,
+            self.chain_id,
         )
         .await
     }

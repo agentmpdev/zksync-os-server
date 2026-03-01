@@ -417,7 +417,7 @@ alloy::sol! {
 #[derive(Clone, Debug)]
 pub struct Bridgehub<P: Provider> {
     instance: IBridgehubInstance<P, Ethereum>,
-    l2_chain_id: u64,
+    pub l2_chain_id: u64,
 }
 
 impl<P: Provider + Clone> Bridgehub<P> {

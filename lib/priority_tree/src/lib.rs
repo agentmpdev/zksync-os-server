@@ -197,8 +197,12 @@ impl<ReplayStorage: ReadReplay, Finality: ReadFinality>
                                 merkle_tree.push_hash(l1_tx.hash().0.into());
                             }
                             ZkEnvelope::System(system_tx) => {
-                                batch_interop_roots
-                                    .extend(system_tx.interop_roots().unwrap_or_default());
+                                if let Some(interop_roots) = system_tx.interop_roots() {
+                                    batch_interop_roots.extend(
+                                        interop_roots.into_iter().filter(|r| r.chainId == 506),
+                                        // interop_roots.into_iter(),
+                                    );
+                                }
                             }
                             _ => {}
                         }
