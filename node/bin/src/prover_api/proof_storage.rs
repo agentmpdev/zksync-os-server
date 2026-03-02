@@ -137,9 +137,11 @@ struct BoundedFileStorage {
     base_dir: PathBuf,
     capacity_bytes: u64,
     current_size: u64,
-    erase_queue: VecDeque<(String, Metadata)>,
-    // `value` is the number of times the `key` has been moved back in `erase_queue`
-    // So while this number is not zero we won't erase the file, but decrement this
+    /// A queue of keys and their metadata, ordered by removal priority (oldest at the front).
+    /// Logically, the keys must be unique. However, outdated entries may be present.
+    /// They should be identified using `skip_cnt` and skipped.
+    remove_queue: VecDeque<(String, Metadata)>,
+    /// The first `skip_cnt` entries for this key in `remove_queue` are outdated.
     skip_cnt: HashMap<String, u64>,
 }
 
@@ -166,7 +168,7 @@ impl BoundedFileStorage {
             base_dir,
             capacity_bytes,
             current_size,
-            erase_queue: files.into_iter().collect(),
+            remove_queue: files.into_iter().collect(),
             skip_cnt: HashMap::new(),
         };
 
@@ -219,19 +221,27 @@ impl BoundedFileStorage {
     async fn enforce_capacity(&mut self, new_file_size: u64) -> anyhow::Result<()> {
         // Delete old files to satisfy capacity constraints
         while self.current_size + new_file_size > self.capacity_bytes
-            && !self.erase_queue.is_empty()
+            && !self.remove_queue.is_empty()
         {
-            let (key, meta) = self.erase_queue.pop_front().unwrap();
-            if let Some(duplicates) = self.skip_cnt.get_mut(&key)
-                && *duplicates > 0
+            let (key, meta) = self.remove_queue.pop_front().unwrap();
+            if let Some(outdated) = self.skip_cnt.get_mut(&key)
+                && *outdated > 0
             {
-                *duplicates -= 1;
+                *outdated -= 1;
                 continue;
             }
 
             fs::remove_file(self.base_dir.join(key)).await?;
             self.current_size -= meta.len();
         }
+
+        if self.remove_queue.is_empty() && self.current_size > 0 {
+            tracing::warn!(
+                current_size = self.current_size,
+                "current_size is not maintained correctly"
+            );
+        }
+
         Ok(())
     }
 
@@ -265,7 +275,7 @@ impl BoundedFileStorage {
         fs::write(&path, data).await?;
         self.current_size += len;
         let meta = fs::metadata(&path).await?;
-        self.erase_queue.push_back((key.to_string(), meta));
+        self.remove_queue.push_back((key.to_string(), meta));
         Ok(())
     }
 }
