@@ -671,7 +671,8 @@ pub struct FakeSnarkProversConfig {
     pub max_batch_age: Duration,
 }
 
-#[derive(Debug, Clone, Default, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, DescribeConfig, DeserializeConfig)]
+#[config(derive(Default))]
 pub struct ProofStorageConfig {
     #[config(default_t = "./db/fri_proofs/".into())]
     pub path: PathBuf,
