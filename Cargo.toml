@@ -252,7 +252,6 @@ zksync_os_storage = { version = "=0.16.0", path = "lib/storage" }
 zksync_os_storage_api = { version = "=0.16.0", path = "lib/storage_api" }
 zksync_os_types = { version = "=0.16.0", path = "lib/types" }
 zksync_os_genesis = { version = "=0.16.0", path = "lib/genesis" }
-zksync_os_object_store = { version = "=0.16.0", path = "lib/object_store" }
 zksync_os_status_server = { version = "=0.16.0", path = "lib/status" }
 zksync_os_multivm = { version = "=0.16.0", path = "lib/multivm" }
 zksync_os_pipeline = { version = "=0.16.0", path = "lib/pipeline" }
