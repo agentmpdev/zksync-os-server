@@ -159,9 +159,9 @@ impl BoundedFileStorage {
                     files.push((filename, meta));
                 } else {
                     tracing::warn!(
-                        base_dir,
-                        name = filename.err(),
-                        "Unrelated file detected, the name cannot be represented using a String"
+                        "Unrelated file detected in {} ({}): the name cannot be represented using a String",
+                        base_dir.display(),
+                        filename.err().unwrap().display()
                     );
                 }
             }
