@@ -12,7 +12,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use zksync_os_l1_sender::batcher_model::{FriProof, SignedBatchEnvelope};
 
-///Persists FRI proofs to disk together with the batch if proof is successful
+/// Persists FRI proofs to disk together with the batch if proof is successful
 #[derive(Clone, Debug)]
 pub struct ProofStorage {
     batches_with_proof: Arc<Mutex<BoundedFileStorage>>,
@@ -21,7 +21,7 @@ pub struct ProofStorage {
 impl ProofStorage {
     pub async fn new(config: ProofStorageConfig) -> anyhow::Result<Self> {
         tracing::info!(
-            path = config.path.to_str().unwrap(),
+            path = config.path.display(),
             batch_with_proof_capacity = config.batch_with_proof_capacity.0,
             failed_capacity = config.failed_capacity.0,
             "Initializing proof storage"
@@ -217,9 +217,8 @@ impl BoundedFileStorage {
     }
 
     /// Delete old files to make space for the new file
-    /// Returns disk usage
     async fn enforce_capacity(&mut self, new_file_size: u64) -> anyhow::Result<()> {
-        //Delete old files to satisfy capacity constraints\
+        // Delete old files to satisfy capacity constraints
         while self.current_size + new_file_size > self.capacity_bytes
             && !self.erase_queue.is_empty()
         {
@@ -237,6 +236,7 @@ impl BoundedFileStorage {
         Ok(())
     }
 
+    /// If present, file at this path is renamed and moved to the end of the queue.
     async fn handle_duplicate(&mut self, mut path_buf: PathBuf) -> anyhow::Result<()> {
         if path_buf.is_file() {
             let file_key = path_buf.file_name().unwrap().to_str().unwrap().to_string();
@@ -250,7 +250,9 @@ impl BoundedFileStorage {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            path_buf.set_extension(format!("overwritten_{now}"));
+            path_buf
+                .as_mut_os_string()
+                .push(format!("_overwritten_{now}"));
 
             self.write_file(path_buf, old_data).await?;
             *self.skip_cnt.entry(file_key.clone()).or_insert(0) += 1;
@@ -258,7 +260,7 @@ impl BoundedFileStorage {
         Ok(())
     }
 
-    ///Write file to disk and add it to erase_queue
+    /// Write file to disk and add it to erase_queue
     async fn write_file(&mut self, file_path: PathBuf, data: Vec<u8>) -> anyhow::Result<()> {
         let len = data.len() as u64;
         fs::write(&file_path, data).await?;
@@ -269,13 +271,13 @@ impl BoundedFileStorage {
     }
 }
 
-//Since this data isn't used by the node itself, I added some tests
+// Since this data isn't used by the node itself, I added some tests
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    //Make sure files are being removed as expected
+    // Make sure files are being removed as expected
     #[tokio::test]
     async fn test_bounded_storage_capacity() -> anyhow::Result<()> {
         let dir = TempDir::new()?;
@@ -283,7 +285,7 @@ mod tests {
         const LIMIT: u64 = 20000;
         let mut storage = BoundedFileStorage::new(path, LIMIT).await?;
 
-        //Many small files
+        // Many small files
         let num_iter = 2000;
         for i in 0..num_iter {
             let key: String = i.to_string();
@@ -306,10 +308,10 @@ mod tests {
             }
         }
 
-        //Large files
+        // Large files
         let big_str = "a".repeat((LIMIT * 2 / 3) as usize);
         storage.store("key", &big_str).await?;
-        //This removes most entries but not all
+        // This removes most entries but not all
         assert!(
             storage
                 .load::<String>(&(num_iter / 2).to_string())
@@ -322,10 +324,10 @@ mod tests {
                 .await?
                 .is_some()
         );
-        //This should remove all the old entries
+        // This should remove all the old entries
         storage.store("key2", &big_str).await?;
         assert!(storage.load::<String>("key").await?.is_none());
-        //Can't store huge files -
+        // Can't store huge files -
         let very_big = "a".repeat((2 * LIMIT) as usize);
         storage.store("key", &very_big).await?;
         assert!(storage.load::<String>("key").await?.is_none());
@@ -339,7 +341,7 @@ mod tests {
         let dir = TempDir::new()?;
         let path = dir.path().to_owned();
         let mut storage = BoundedFileStorage::new(path, LIMIT).await?;
-        //overrides in case of large strings
+        // overrides in case of large strings
         let big_str_a = "a".repeat((LIMIT * 2 / 3) as usize);
         storage.store("key", &big_str_a).await?;
         assert_eq!(storage.load("key").await?, Some(big_str_a));
@@ -361,11 +363,11 @@ mod tests {
         storage.store("0", &str2).await?;
         storage.store("1", &str2).await?;
         storage.store("0", &str1).await?;
-        //TODO: handle acse when overwrite is the same value
+        // TODO: handle acse when overwrite is the same value
         storage.store("0", &str2).await?;
         assert_eq!(storage.load::<String>("1").await?, None);
         storage.store("1", &str2).await?;
-        //Duplicate was removed here
+        // Duplicate was removed here
         assert!(storage.load::<String>("0").await?.is_some());
         assert!(storage.load::<String>("1").await?.is_some());
 

@@ -666,7 +666,7 @@ pub struct FakeSnarkProversConfig {
     pub max_batch_age: Duration,
 }
 
-#[derive(Debug, Clone, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, Default, DescribeConfig, DeserializeConfig)]
 pub struct ProofStorageConfig {
     #[config(default_t = "./db/fri_proofs/".into())]
     pub path: PathBuf,
@@ -678,16 +678,6 @@ pub struct ProofStorageConfig {
     /// old entries are removed to keep usage capped
     #[config(default_t = 1 * SizeUnit::GiB)]
     pub failed_capacity: ByteSize,
-}
-
-impl Default for ProofStorageConfig {
-    fn default() -> Self {
-        Self {
-            path: "./db/fri_proofs/".into(),
-            batch_with_proof_capacity: 1 * SizeUnit::GiB,
-            failed_capacity: 1 * SizeUnit::GiB,
-        }
-    }
 }
 
 /// Set of options related to the observability stack,
