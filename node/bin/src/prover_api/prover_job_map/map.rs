@@ -483,13 +483,13 @@ mod tests {
                 dependency_roots_rolling_hash: B256::ZERO,
                 l2_to_l1_logs_root_hash: B256::ZERO,
                 commitment: B256::ZERO,
-                last_block_timestamp: 0,
             },
             batch_info: BatchInfo {
                 commit_info: CommitBatchInfo {
                     batch_number,
                     new_state_commitment: B256::ZERO,
                     number_of_layer1_txs: 0,
+                    number_of_layer2_txs: 0,
                     priority_operations_hash: B256::ZERO,
                     dependency_roots_rolling_hash: B256::ZERO,
                     l2_to_l1_logs_root_hash: B256::ZERO,
@@ -501,6 +501,7 @@ mod tests {
                     last_block_number: Some(batch_number),
                     chain_id: 1,
                     operator_da_input: vec![],
+                    sl_chain_id: 2,
                 },
                 chain_address: Address::ZERO,
                 upgrade_tx_hash: None,
@@ -513,6 +514,9 @@ mod tests {
             execution_version: 1,
             protocol_version: ProtocolSemanticVersion::legacy_genesis_version(),
             computational_native_used: None,
+            logs: vec![],
+            messages: vec![],
+            multichain_root: Default::default(),
         };
 
         BatchForSigning::new(batch, vec![1, 2, 3])

@@ -7,15 +7,13 @@ mod command_source;
 pub mod config;
 pub mod default_protocol_version;
 mod en_remote_config;
-mod l1_provider;
 mod node_state_on_startup;
 mod priority_tree_steps;
 pub mod prover_api;
 mod prover_input_generator;
+mod provider;
 mod state_initializer;
 pub mod tree_manager;
-
-use zksync_os_mempool::InteropRootsTxPool;
 
 use crate::batch_sink::{BatchSink, NoOpSink, clear_failing_block_config_task};
 use crate::batcher::{Batcher, BatcherStartupConfig, util::load_genesis_stored_batch_info};
@@ -24,7 +22,6 @@ use crate::config::{
     Config, ProverApiConfig, base_token_price_updater_config, gas_adjuster_config,
 };
 use crate::en_remote_config::load_remote_config;
-use crate::l1_provider::build_node_l1_provider;
 use crate::node_state_on_startup::NodeStateOnStartup;
 use crate::priority_tree_steps::priority_tree_en_step::PriorityTreeENStep;
 use crate::priority_tree_steps::priority_tree_pipeline_step::PriorityTreePipelineStep;
@@ -38,6 +35,7 @@ use crate::prover_api::prover_server;
 use crate::prover_api::snark_job_manager::{FakeSnarkProver, SnarkJobManager};
 use crate::prover_api::snark_proving_pipeline_step::SnarkProvingPipelineStep;
 use crate::prover_input_generator::ProverInputGenerator;
+use crate::provider::build_node_provider;
 use crate::state_initializer::StateInitializer;
 use crate::tree_manager::TreeManager;
 use alloy::consensus::BlobTransactionSidecar;
@@ -71,7 +69,12 @@ use zksync_os_l1_watcher::{
     L1ExecuteWatcher, L1TxWatcher, L1UpgradeTxWatcher,
 };
 use zksync_os_l1_watcher::{InteropWatcher, L1PersistBatchWatcher};
-use zksync_os_mempool::L2TransactionPool;
+use zksync_os_mempool::Pool;
+use zksync_os_mempool::subpools::interop_roots::InteropRootsSubpool;
+use zksync_os_mempool::subpools::l1::L1Subpool;
+use zksync_os_mempool::subpools::l2::L2Subpool;
+use zksync_os_mempool::subpools::sl_chain_id::SlChainIdSubpool;
+use zksync_os_mempool::subpools::upgrade::UpgradeSubpool;
 use zksync_os_merkle_tree::{MerkleTree, MerkleTreeVersion, RocksDBWrapper};
 use zksync_os_metadata::NODE_VERSION;
 use zksync_os_network::service::NetworkService;
@@ -94,7 +97,7 @@ use zksync_os_storage_api::{
 };
 use zksync_os_types::{
     InteropRootsLogIndex, ProtocolSemanticVersion, PubdataMode, TransactionAcceptanceState,
-    UpgradeTransaction,
+    UpgradeInfo, UpgradeMetadata,
 };
 
 const BLOCK_REPLAY_WAL_DB_NAME: &str = "block_replay_wal";
@@ -171,42 +174,70 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     GENERAL_METRICS.fee_collector_address[&fee_collector_address].set(1);
     GENERAL_METRICS.chain_id.set(chain_id);
 
-    // Channel between L1TxWatcher and Sequencer
-    let (l1_transactions_sender, l1_transactions_for_sequencer) = tokio::sync::mpsc::channel(5);
-
-    // Channel between L1UpgradeWatcher and Sequencer
-    let (l1_upgrade_transactions_sender, l1_upgrade_transactions_receiver) =
-        tokio::sync::mpsc::channel(5);
-
     // This is the only place where we initialize L1 provider, every component shares the same
     // cloned provider.
-    let l1_provider = build_node_l1_provider(&config.general_config.l1_rpc_url).await;
+    let l1_provider = build_node_provider(&config.general_config.l1_rpc_url).await;
+    let sl_provider = match &config.general_config.gateway_rpc_url {
+        Some(url) => build_node_provider(url).await,
+        None => l1_provider.clone(),
+    };
+    let gateway_provider = config
+        .general_config
+        .gateway_rpc_url
+        .as_ref()
+        .map(|_| sl_provider.clone());
 
     tracing::info!("Reading L1 state");
     let l1_state = if node_role.is_main() {
         // On the main node, we need to wait for the pending L1 transactions (commit/prove/execute) to be mined before proceeding.
-        L1State::fetch_finalized(l1_provider.clone().erased(), bridgehub_address, chain_id)
-            .await
-            .expect("failed to fetch finalized L1 state")
+        L1State::fetch_finalized(
+            l1_provider.clone().erased(),
+            sl_provider.clone().erased(),
+            bridgehub_address,
+            chain_id,
+        )
+        .await
+        .expect("failed to fetch finalized L1 state")
     } else {
-        L1State::fetch(l1_provider.clone().erased(), bridgehub_address, chain_id)
-            .await
-            .expect("failed to fetch L1 state")
+        L1State::fetch(
+            l1_provider.clone().erased(),
+            sl_provider.clone().erased(),
+            bridgehub_address,
+            chain_id,
+        )
+        .await
+        .expect("failed to fetch L1 state")
     };
     tracing::info!(?l1_state, "L1 state");
     l1_state.report_metrics();
 
     match (config.l1_sender_config.pubdata_mode, l1_state.da_input_mode) {
-        (PubdataMode::Calldata | PubdataMode::Blobs, BatchDaInputMode::Validium)
+        (
+            PubdataMode::Calldata | PubdataMode::Blobs | PubdataMode::RelayedL2Calldata,
+            BatchDaInputMode::Validium,
+        )
         | (PubdataMode::Validium, BatchDaInputMode::Rollup) => {
-            panic!("Pubdata mode doesn't correspond to pricing mode from the l1");
+            panic!(
+                "Pubdata mode doesn't correspond to pricing mode from the l1. \
+                L1 mode: {:?}, configured pubdata mode: {:?}",
+                l1_state.da_input_mode, config.l1_sender_config.pubdata_mode
+            );
         }
         _ => {}
     };
+    if let (PubdataMode::Blobs | PubdataMode::Calldata, true) = (
+        config.l1_sender_config.pubdata_mode,
+        config.general_config.gateway_rpc_url.is_some(),
+    ) {
+        panic!(
+            "Pubdata mode {:?} cannot be used when settling on Gateway",
+            config.l1_sender_config.pubdata_mode
+        );
+    }
 
     let genesis = Genesis::new(
         genesis_input_source.clone(),
-        l1_state.diamond_proxy.clone(),
+        l1_state.diamond_proxy_l1.clone(),
         chain_id,
     );
 
@@ -264,7 +295,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 
     tracing::info!("Initializing mempools");
     let zk_provider_factory = ZkProviderFactory::new(state.clone(), repositories.clone(), chain_id);
-    let l2_mempool = zksync_os_mempool::in_memory(
+    let l2_subpool = zksync_os_mempool::subpools::l2::in_memory(
         zk_provider_factory.clone(),
         config.mempool_config.clone().into(),
         config.tx_validator_config.clone().into(),
@@ -341,21 +372,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 
     node_startup_state.assert_consistency();
 
-    // If we start from the very first block, we should start by sending upgrade tx for genesis.
-    if starting_block == 1 {
-        let genesis_upgrade = genesis.genesis_upgrade_tx().await;
-        let upgrade_tx = UpgradeTransaction {
-            tx: Some(genesis_upgrade.tx),
-            protocol_version: genesis_upgrade.protocol_version,
-            timestamp: 0, // No restrictions on timestamp.
-            force_preimages: genesis_upgrade.force_deploy_preimages,
-        };
-        l1_upgrade_transactions_sender
-            .send(upgrade_tx)
-            .await
-            .expect("failed to send genesis upgrade transaction to sequencer");
-    }
-
     // Channel between NetworkService and Sequencer
     let (replay_sender, replays_for_sequencer) = tokio::sync::mpsc::channel(128);
     if config.network_config.enabled {
@@ -400,7 +416,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     tasks.spawn(
         L1CommitWatcher::create_watcher(
             config.l1_watcher_config.clone().into(),
-            node_startup_state.l1_state.diamond_proxy.clone(),
+            node_startup_state.l1_state.diamond_proxy_sl.clone(),
             committed_batch_provider.clone(),
             finality_storage.clone(),
         )
@@ -413,7 +429,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     tasks.spawn(
         L1ExecuteWatcher::create_watcher(
             config.l1_watcher_config.clone().into(),
-            node_startup_state.l1_state.diamond_proxy.clone(),
+            node_startup_state.l1_state.diamond_proxy_sl.clone(),
             committed_batch_provider.clone(),
             finality_storage.clone(),
         )
@@ -445,15 +461,34 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         genesis.genesis_upgrade_tx().await.protocol_version
     };
 
-    let interop_roots_tx_pool = InteropRootsTxPool::new(10);
+    let upgrade_subpool = UpgradeSubpool::new(current_protocol_version.clone());
+    let sl_chain_id_subpool = SlChainIdSubpool::default();
+    let interop_roots_subpool = InteropRootsSubpool::new(
+        // todo: change to config.sequencer_config.interop_roots_per_tx when contracts are updated
+        1,
+    );
+
+    // If we start from the very first block, we should start by sending upgrade tx for genesis.
+    if starting_block == 1 {
+        let genesis_upgrade = genesis.genesis_upgrade_tx().await;
+        let upgrade_tx = UpgradeInfo {
+            tx: Some(genesis_upgrade.tx),
+            metadata: UpgradeMetadata {
+                protocol_version: genesis_upgrade.protocol_version,
+                timestamp: 0, // No restrictions on timestamp.
+                force_preimages: genesis_upgrade.force_deploy_preimages,
+            },
+        };
+        upgrade_subpool.insert(upgrade_tx).await;
+    }
 
     if current_protocol_version >= ProtocolSemanticVersion::new(0, 31, 0) {
         tasks.spawn(
             InteropWatcher::create_watcher(
-                node_startup_state.l1_state.bridgehub.clone(),
+                node_startup_state.l1_state.bridgehub_sl.clone(), // TODO: what bridgehub to use here?
                 config.l1_watcher_config.clone().into(),
                 next_interop_event_index.clone(),
-                interop_roots_tx_pool.clone(),
+                interop_roots_subpool.clone(),
             )
             .await
             .expect("failed to start L1 interop roots watcher")
@@ -461,9 +496,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             .map(report_exit("L1 interop roots watcher")),
         );
     }
-
-    let (sl_chain_id_update_transactions_sender, sl_chain_id_update_transactions_receiver) =
-        tokio::sync::mpsc::channel(10);
 
     if current_protocol_version >= ProtocolSemanticVersion::new(0, 31, 0)
         && config.l1_watcher_config.enable_gw_migration_watcher
@@ -473,9 +505,9 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         if is_gateway {
             tasks.spawn(
                 GatewayMigrationWatcher::<Gateway>::create_watcher(
-                    node_startup_state.l1_state.diamond_proxy.clone(),
+                    node_startup_state.l1_state.diamond_proxy_l1.clone(),
                     config.l1_watcher_config.clone().into(),
-                    sl_chain_id_update_transactions_sender,
+                    sl_chain_id_subpool.clone(),
                 )
                 .await
                 .expect("failed to start L1 chain id update watcher")
@@ -485,9 +517,9 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         } else {
             tasks.spawn(
                 GatewayMigrationWatcher::<L1>::create_watcher(
-                    node_startup_state.l1_state.diamond_proxy.clone(),
+                    node_startup_state.l1_state.diamond_proxy_l1.clone(),
                     config.l1_watcher_config.clone().into(),
-                    sl_chain_id_update_transactions_sender,
+                    sl_chain_id_subpool.clone(),
                 )
                 .await
                 .expect("failed to start L1 chain id update watcher")
@@ -497,11 +529,13 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         }
     }
 
+    let l1_subpool = L1Subpool::new(10);
     tasks.spawn(
         L1TxWatcher::create_watcher(
             config.l1_watcher_config.clone().into(),
-            node_startup_state.l1_state.diamond_proxy.clone(),
-            l1_transactions_sender,
+            node_startup_state.l1_state.diamond_proxy_l1.clone(),
+            node_startup_state.l1_state.diamond_proxy_sl.clone(),
+            l1_subpool.clone(),
             next_l1_priority_id,
         )
         .await
@@ -544,7 +578,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             config.l1_sender_config.max_priority_fee_per_gas.0,
         );
         let gas_adjuster = GasAdjuster::new(
-            l1_provider.clone().erased(),
+            sl_provider.clone().erased(),
             gas_adjuster_config,
             pubdata_price_sender,
             blob_fill_ratio_sender,
@@ -597,14 +631,17 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         config.l1_sender_config.pubdata_mode,
     );
 
+    let pool = Pool::new(
+        upgrade_subpool.clone(),
+        sl_chain_id_subpool,
+        interop_roots_subpool,
+        l1_subpool,
+        l2_subpool.clone(),
+    );
     let block_context_provider = BlockContextProvider::new(
         next_l1_priority_id,
         next_interop_event_index,
-        l1_transactions_for_sequencer,
-        l1_upgrade_transactions_receiver,
-        sl_chain_id_update_transactions_receiver,
-        interop_roots_tx_pool,
-        l2_mempool.clone(),
+        pool,
         block_hashes_for_next_block,
         previous_block_timestamp,
         chain_id,
@@ -612,8 +649,6 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         config.sequencer_config.block_pubdata_limit_bytes,
         // We set the value to the same as for the batch, since it should be enforced by batcher, but don't want to exceed it for the block
         config.batcher_config.interop_roots_per_batch_limit,
-        // todo: change to config.sequencer_config.interop_roots_per_tx when contracts are updated
-        1,
         config.sequencer_config.service_block_delay,
         current_protocol_version.clone(),
         config.sequencer_config.fee_collector_address,
@@ -626,10 +661,11 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     tasks.spawn(
         L1UpgradeTxWatcher::create_watcher(
             config.l1_watcher_config.clone().into(),
-            node_startup_state.l1_state.diamond_proxy.clone(),
+            node_startup_state.l1_state.diamond_proxy_l1.clone(),
+            node_startup_state.l1_state.diamond_proxy_sl.clone(),
             bytecode_supplier_address,
             current_protocol_version,
-            l1_upgrade_transactions_sender,
+            upgrade_subpool,
         )
         .await
         .expect("failed to start L1 upgrade transaction watcher")
@@ -644,7 +680,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
     tasks.spawn(
         L1PersistBatchWatcher::create_watcher(
             config.l1_watcher_config.clone().into(),
-            node_startup_state.l1_state.diamond_proxy.clone(),
+            node_startup_state.l1_state.diamond_proxy_sl.clone(),
             persistent_batch_storage.clone(),
             finality_storage.clone(),
         )
@@ -672,17 +708,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 
     if node_role.is_main() {
         let mut base_token_price_updater = BaseTokenPriceUpdater::new(
-            l1_state
-                .diamond_proxy
-                .get_base_token_address()
-                .await
-                .expect("Failed to get base token address"),
-            *l1_state.diamond_proxy.address(),
-            l1_state
-                .diamond_proxy
-                .get_admin()
-                .await
-                .expect("Failed to get chain admin address"),
+            l1_state.diamond_proxy_l1.clone(),
             l1_provider.clone(),
             base_token_price_updater_config(
                 &config.base_token_price_updater_config,
@@ -706,7 +732,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         // Main Node
         run_main_node_pipeline(
             &config,
-            l1_provider.clone(),
+            sl_provider.clone(),
             node_startup_state,
             block_replay_storage.clone(),
             &mut tasks,
@@ -770,13 +796,13 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             chain_id,
             bridgehub_address,
             bytecode_supplier_address,
-            committed_batch_provider,
             rpc_storage,
-            l2_mempool,
+            l2_subpool,
             genesis_input_source,
             tx_acceptance_state_receiver,
             last_constructed_block_ctx_receiver,
             main_node_provider,
+            gateway_provider.map(|p| p.erased()),
         )
         .map(report_exit("JSON-RPC server")),
     );
@@ -790,7 +816,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
 #[allow(clippy::too_many_arguments)]
 async fn run_main_node_pipeline(
     config: &Config,
-    l1_provider: FillProvider<
+    sl_provider: FillProvider<
         impl TxFiller<Ethereum> + WalletProvider<Wallet = EthereumWallet> + 'static,
         impl Provider<Ethereum> + Clone + 'static,
     >,
@@ -800,7 +826,7 @@ async fn run_main_node_pipeline(
     state: impl ReadStateHistory + WriteState + Clone,
     starting_block: u64,
     repositories: impl WriteRepository + Clone,
-    block_context_provider: BlockContextProvider<impl L2TransactionPool>,
+    block_context_provider: BlockContextProvider<impl L2Subpool>,
     tree: MerkleTree<RocksDBWrapper>,
     finality: impl ReadFinality + Clone,
     chain_id: u64,
@@ -910,12 +936,14 @@ async fn run_main_node_pipeline(
                 last_persisted_block: node_state_on_startup.block_replay_storage_last_block,
             },
             chain_id,
-            chain_address: node_state_on_startup.l1_state.diamond_proxy_address(),
+            sl_chain_id: node_state_on_startup.l1_state.sl_chain_id,
+            chain_address_sl: node_state_on_startup.l1_state.diamond_proxy_address_sl(),
             pubdata_limit_bytes: config.sequencer_config.block_pubdata_limit_bytes,
             batcher_config: config.batcher_config.clone(),
             pubdata_mode: config.l1_sender_config.pubdata_mode,
             sidecar_sender,
             committed_batch_provider: committed_batch_provider.clone(),
+            read_state: state.clone(),
         })
         .pipe(BatchVerificationPipelineStep::new(
             config.batch_verification_config.clone().into(),
@@ -930,21 +958,23 @@ async fn run_main_node_pipeline(
             batch_verification_l1_config: node_state_on_startup.l1_state.batch_verification.clone(),
         })
         .pipe(UpgradeGatekeeper::new(
-            node_state_on_startup.l1_state.diamond_proxy.clone(),
+            node_state_on_startup.l1_state.diamond_proxy_sl.clone(),
         ))
         .pipe(L1Sender::<_, _, CommitCommand> {
-            provider: l1_provider.clone(),
+            provider: sl_provider.clone(),
             config: config.l1_sender_config.clone().into(),
-            to_address: node_state_on_startup.l1_state.validator_timelock,
+            to_address: node_state_on_startup.l1_state.validator_timelock_sl,
+            gateway: config.general_config.gateway_rpc_url.is_some(),
         })
         .pipe(snark_proving_step)
         .pipe(GaplessL1ProofSender::new(
             node_state_on_startup.l1_state.last_executed_batch + 1,
         ))
         .pipe(L1Sender::<_, _, ProofCommand> {
-            provider: l1_provider.clone(),
+            provider: sl_provider.clone(),
             config: config.l1_sender_config.clone().into(),
-            to_address: node_state_on_startup.l1_state.validator_timelock,
+            to_address: node_state_on_startup.l1_state.validator_timelock_sl,
+            gateway: config.general_config.gateway_rpc_url.is_some(),
         })
         .pipe(
             PriorityTreePipelineStep::new(
@@ -957,9 +987,10 @@ async fn run_main_node_pipeline(
             .unwrap(),
         )
         .pipe(L1Sender {
-            provider: l1_provider,
+            provider: sl_provider,
             config: config.l1_sender_config.clone().into(),
-            to_address: node_state_on_startup.l1_state.validator_timelock,
+            to_address: node_state_on_startup.l1_state.validator_timelock_sl,
+            gateway: config.general_config.gateway_rpc_url.is_some(),
         })
         .pipe(BatchSink::new(internal_config_manager))
         .spawn(tasks);
@@ -975,7 +1006,7 @@ async fn run_en_pipeline(
     node_state_on_startup: NodeStateOnStartup,
     block_replay_storage: impl WriteReplay + Clone,
     tasks: &mut JoinSet<()>,
-    block_context_provider: BlockContextProvider<impl L2TransactionPool>,
+    block_context_provider: BlockContextProvider<impl L2Subpool>,
     state: impl ReadStateHistory + WriteState + Clone,
     tree: MerkleTree<RocksDBWrapper>,
     repositories: impl WriteRepository + Clone,
@@ -1024,11 +1055,12 @@ async fn run_en_pipeline(
             config.batch_verification_config.client_enabled,
             BatchVerificationClient::new(
                 chain_id,
-                *node_state_on_startup.l1_state.diamond_proxy.address(),
+                node_state_on_startup.l1_state.diamond_proxy_address_sl(),
                 config.batch_verification_config.connect_address.clone(),
                 config.batch_verification_config.signing_key.clone(),
                 finality.clone(),
                 node_state_on_startup.l1_state.clone(),
+                state.clone(),
             ),
             NoOpSink::new(),
         )

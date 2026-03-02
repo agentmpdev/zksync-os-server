@@ -26,10 +26,10 @@ use tokio::sync::watch;
 use zk_ee::common_structs::derive_flat_storage_key;
 use zk_os_api::helpers::{get_balance, get_code};
 use zksync_os_interface::traits::ReadStorage;
-use zksync_os_mempool::L2TransactionPool;
+use zksync_os_mempool::subpools::l2::L2Subpool;
 use zksync_os_rpc_api::eth::EthApiServer;
 use zksync_os_rpc_api::types::{
-    RpcBlockConvert, ZkApiBlock, ZkApiTransaction, ZkHeader, ZkTransactionReceipt,
+    L2FeeHistory, RpcBlockConvert, ZkApiBlock, ZkApiTransaction, ZkHeader, ZkTransactionReceipt,
 };
 use zksync_os_storage_api::{RepositoryError, StateError, TxMeta, ViewState};
 use zksync_os_types::{L2Envelope, TransactionAcceptanceState, ZkReceiptEnvelope};
@@ -46,7 +46,7 @@ pub struct EthNamespace<RpcStorage, Mempool> {
     chain_id: u64,
 }
 
-impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcStorage, Mempool> {
+impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Mempool> {
     pub fn new(
         config: RpcConfig,
         storage: RpcStorage,
@@ -74,7 +74,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
     }
 }
 
-impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcStorage, Mempool> {
+impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthNamespace<RpcStorage, Mempool> {
     fn block_number_impl(&self) -> EthResult<U256> {
         Ok(U256::from(self.storage.repository().get_latest_block()))
     }
@@ -343,9 +343,12 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
         block_count: U64,
         mut newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
-    ) -> EthResult<FeeHistory> {
+    ) -> EthResult<L2FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default());
+            return Ok(L2FeeHistory {
+                base: Default::default(),
+                pubdata_price_per_byte: Some(vec![]),
+            });
         }
         if newest_block.is_pending() {
             // cap the target block since we don't have fee history for the pending block
@@ -385,16 +388,18 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
         let start_block = end_block_plus - block_count;
 
         let mut base_fee_per_gas = Vec::with_capacity(block_count as usize + 1);
+        let mut pubdata_price_per_byte = Vec::with_capacity(block_count as usize);
         for block in start_block..=end_block {
-            let base_fee = self
+            let (base_fee, pubdata_price) = self
                 .storage
                 .replay_storage()
                 .get_context(block)
-                .map(|c| c.eip1559_basefee)
+                .map(|c| (c.eip1559_basefee, c.pubdata_price))
                 .ok_or(EthError::BlockNotFound(BlockId::Number(
                     BlockNumberOrTag::Number(block),
                 )))?;
             base_fee_per_gas.push(base_fee.saturating_to());
+            pubdata_price_per_byte.push(pubdata_price);
         }
         if let Some(base_fee) = self
             .storage
@@ -415,21 +420,25 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
         // ZKsync OS chains are not fully EIP-1559 compliant and using 0 as a priority fee should always work,
         // so we return zeroes to keep code simpler.
         let reward = reward_percentiles.map(|p| vec![vec![0; p.len()]; block_count as usize]);
-
-        Ok(FeeHistory {
+        let base = FeeHistory {
             base_fee_per_gas,
             oldest_block: start_block,
             // Conventional values.
             gas_used_ratio: vec![0.5; block_count as usize],
-            base_fee_per_blob_gas: vec![],
-            blob_gas_used_ratio: vec![],
+            base_fee_per_blob_gas: vec![0; (block_count + 1) as usize],
+            blob_gas_used_ratio: vec![0.0; block_count as usize],
             reward,
+        };
+
+        Ok(L2FeeHistory {
+            base,
+            pubdata_price_per_byte: Some(pubdata_price_per_byte),
         })
     }
 }
 
 #[async_trait]
-impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthApiServer
+impl<RpcStorage: ReadRpcStorage, Mempool: L2Subpool> EthApiServer
     for EthNamespace<RpcStorage, Mempool>
 {
     async fn protocol_version(&self) -> RpcResult<String> {
@@ -702,7 +711,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthApiServer
         block_count: U64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
-    ) -> RpcResult<FeeHistory> {
+    ) -> RpcResult<L2FeeHistory> {
         self.fee_history_impl(block_count, newest_block, reward_percentiles)
             .to_rpc_result()
     }

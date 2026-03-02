@@ -1,5 +1,6 @@
 use alloy::consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
 use alloy::primitives::{Address, B256, BlockNumber, U256, keccak256};
+use alloy::sol_types::SolValue;
 use blake2::{Blake2s256, Digest};
 use serde::{Deserialize, Serialize};
 use std::ops;
@@ -29,6 +30,7 @@ pub struct BatchInfo {
 }
 
 impl BatchInfo {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blocks: Vec<(
             &BlockOutput,
@@ -40,9 +42,13 @@ impl BatchInfo {
         chain_address: Address,
         batch_number: u64,
         pubdata_mode: PubdataMode,
+        sl_chain_id: u64,
+        multichain_root: B256,
+        protocol_version: &ProtocolSemanticVersion,
     ) -> Self {
         let mut priority_operations_hash = keccak256([]);
         let mut number_of_layer1_txs = 0;
+        let mut number_of_layer2_txs = 0;
         let mut total_pubdata = vec![];
         let mut encoded_l2_l1_logs = vec![];
 
@@ -55,14 +61,15 @@ impl BatchInfo {
 
             for tx in transactions {
                 match tx.envelope() {
-                    ZkEnvelope::System(_) => {}
+                    ZkEnvelope::System(_) | ZkEnvelope::L2(_) => {
+                        number_of_layer2_txs += 1;
+                    }
                     ZkEnvelope::L1(l1_tx) => {
                         let onchain_data_hash = l1_tx.hash();
                         priority_operations_hash =
                             keccak256([priority_operations_hash.0, onchain_data_hash.0].concat());
                         number_of_layer1_txs += 1;
                     }
-                    ZkEnvelope::L2(_) => {}
                     ZkEnvelope::Upgrade(_) => {
                         assert!(
                             upgrade_tx_hash.is_none(),
@@ -123,13 +130,20 @@ impl BatchInfo {
             Some(L2_TO_L1_TREE_SIZE),
         )
         .merkle_root();
-        // The result should be Keccak(l2_l1_local_root, aggreagation_root) - we don't compute aggregation root yet
-        let l2_to_l1_logs_root_hash = keccak256([l2_l1_local_root.0, [0u8; 32]].concat());
+
+        let l2_to_l1_logs_root_hash = if protocol_version.is_post_v31() {
+            // The result should be Keccak(l2_l1_local_root, multichain_root).
+            keccak256([l2_l1_local_root.0, multichain_root.0].concat())
+        } else {
+            // For older protocol versions, multichain root should be set to zero.
+            keccak256([l2_l1_local_root.0, [0u8; 32]].concat())
+        };
 
         let commit_info = CommitBatchInfo {
             batch_number,
             new_state_commitment,
             number_of_layer1_txs,
+            number_of_layer2_txs,
             priority_operations_hash,
             dependency_roots_rolling_hash: B256::ZERO,
             l2_to_l1_logs_root_hash,
@@ -141,6 +155,7 @@ impl BatchInfo {
             last_block_number: Some(last_block_output.header.number),
             chain_id,
             operator_da_input: da_fields.operator_da_input,
+            sl_chain_id,
         };
         Self {
             commit_info,
@@ -153,34 +168,42 @@ impl BatchInfo {
     /// Calculate keccak256 hash of BatchOutput part of public input
     pub fn public_input_hash(&self, protocol_version: &ProtocolSemanticVersion) -> B256 {
         let commit_info = &self.commit_info;
+        let upgrade_tx_hash = self.upgrade_tx_hash.unwrap_or(B256::ZERO);
         match protocol_version.minor {
-            // 31 needed for upgrade integration test
-            30..=31 => {
-                use zk_ee::utils::Bytes32;
-                let system_batch_output =
-                    zk_os_basic_system::system_implementation::system::BatchOutput {
-                        chain_id: U256::from(commit_info.chain_id),
-                        first_block_timestamp: commit_info.first_block_timestamp,
-                        last_block_timestamp: commit_info.last_block_timestamp,
-                        da_commitment_scheme: (commit_info.l2_da_commitment_scheme as u8)
-                            .try_into()
-                            .expect("Failed to convert DA commitment scheme"),
-                        pubdata_commitment: Bytes32::from(commit_info.da_commitment.0),
-                        number_of_layer_1_txs: U256::from(commit_info.number_of_layer1_txs),
-                        priority_operations_hash: Bytes32::from(
-                            commit_info.priority_operations_hash.0,
-                        ),
-                        l2_logs_tree_root: Bytes32::from(commit_info.l2_to_l1_logs_root_hash.0),
-                        upgrade_tx_hash: self
-                            .upgrade_tx_hash
-                            .map(|h| Bytes32::from_array(h.0))
-                            .unwrap_or(Bytes32::ZERO),
-                        interop_root_rolling_hash: Bytes32::from(
-                            commit_info.dependency_roots_rolling_hash.0,
-                        ),
-                    };
-                B256::from(system_batch_output.hash())
-            }
+            // v30 and v31 use different packed layouts for batch output hash:
+            // v31 inserts number_of_layer2_txs between L1 tx count and priority_operations_hash.
+            30 => B256::from(keccak256(
+                (
+                    U256::from(commit_info.chain_id),
+                    commit_info.first_block_timestamp,
+                    commit_info.last_block_timestamp,
+                    U256::from(commit_info.l2_da_commitment_scheme as u8),
+                    commit_info.da_commitment,
+                    U256::from(commit_info.number_of_layer1_txs),
+                    commit_info.priority_operations_hash,
+                    commit_info.l2_to_l1_logs_root_hash,
+                    upgrade_tx_hash,
+                    commit_info.dependency_roots_rolling_hash,
+                )
+                    .abi_encode_packed(),
+            )),
+            31 => B256::from(keccak256(
+                (
+                    U256::from(commit_info.chain_id),
+                    commit_info.first_block_timestamp,
+                    commit_info.last_block_timestamp,
+                    U256::from(commit_info.l2_da_commitment_scheme as u8),
+                    commit_info.da_commitment,
+                    U256::from(commit_info.number_of_layer1_txs),
+                    U256::from(commit_info.number_of_layer2_txs),
+                    commit_info.priority_operations_hash,
+                    commit_info.l2_to_l1_logs_root_hash,
+                    upgrade_tx_hash,
+                    commit_info.dependency_roots_rolling_hash,
+                    U256::from(commit_info.sl_chain_id),
+                )
+                    .abi_encode_packed(),
+            )),
             _ => panic!("Unsupported protocol version: {protocol_version}"),
         }
     }
@@ -196,7 +219,6 @@ impl BatchInfo {
             dependency_roots_rolling_hash: commit_info.dependency_roots_rolling_hash,
             l2_to_l1_logs_root_hash: commit_info.l2_to_l1_logs_root_hash,
             commitment,
-            last_block_timestamp: commit_info.last_block_timestamp,
         }
     }
 }
@@ -228,7 +250,8 @@ fn calculate_da_fields(
 ) -> DAFields {
     let (da_commitment, operator_da_input, blob_sidecar) =
         match (pubdata_mode, batch_execution_version) {
-            (PubdataMode::Calldata, _) | (PubdataMode::Validium, 4) => {
+            (PubdataMode::Calldata | PubdataMode::RelayedL2Calldata, _)
+            | (PubdataMode::Validium, 4) => {
                 let mut operator_da_input = Vec::with_capacity(32 * 3 + 1 + pubdata.len() + 1 + 32);
 
                 // reference for this header is taken from zk_ee: https://github.com/matter-labs/zk_ee/blob/ad-aggregation-program/aggregator/src/aggregation/da_commitment.rs#L27
