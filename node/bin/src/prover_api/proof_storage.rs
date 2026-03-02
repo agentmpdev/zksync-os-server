@@ -21,7 +21,7 @@ pub struct ProofStorage {
 impl ProofStorage {
     pub async fn new(config: ProofStorageConfig) -> anyhow::Result<Self> {
         tracing::info!(
-            path = config.path.display(),
+            path = config.path.display().to_string(),
             batch_with_proof_capacity = config.batch_with_proof_capacity.0,
             failed_capacity = config.failed_capacity.0,
             "Initializing proof storage"
@@ -188,13 +188,12 @@ impl BoundedFileStorage {
     async fn store<T: Serialize>(&mut self, key: &str, value: &T) -> anyhow::Result<u64> {
         fs::create_dir_all(&self.base_dir).await?;
 
-        let file_path = self.base_dir.join(key);
         let data = serde_json::to_vec(value)?;
         let count = data.len() as u64;
         self.enforce_capacity(count).await?;
-        self.handle_duplicate(file_path.clone()).await?;
+        self.handle_duplicate(key).await?;
         if count <= self.capacity_bytes {
-            self.write_file(file_path.clone(), data).await?;
+            self.write_file(key, data).await?;
         } else {
             tracing::warn!(
                 data_len = data.len(),
@@ -237,36 +236,36 @@ impl BoundedFileStorage {
     }
 
     /// If present, file at this path is renamed and moved to the end of the queue.
-    async fn handle_duplicate(&mut self, mut path_buf: PathBuf) -> anyhow::Result<()> {
-        if path_buf.is_file() {
-            let file_key = path_buf.file_name().unwrap().to_str().unwrap().to_string();
-            tracing::info!("Storing old version of {}", file_key);
+    async fn handle_duplicate(&mut self, key: &str) -> anyhow::Result<()> {
+        let path = self.base_dir.join(key);
+        if path.is_file() {
+            tracing::info!("Storing old version of {}", key);
 
-            let old_data = fs::read(&path_buf).await?;
-            fs::remove_file(&path_buf).await?;
+            // Delete the file
+            let old_data = fs::read(&path).await?;
+            fs::remove_file(&path).await?;
             self.current_size -= old_data.len() as u64;
+            *self.skip_cnt.entry(key.to_string()).or_insert(0) += 1;
 
+            // Save it again under a different name
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            path_buf
-                .as_mut_os_string()
-                .push(format!("_overwritten_{now}"));
-
-            self.write_file(path_buf, old_data).await?;
-            *self.skip_cnt.entry(file_key.clone()).or_insert(0) += 1;
+            self.write_file(&format!("{key}.overwritten_{now}"), old_data)
+                .await?;
         }
         Ok(())
     }
 
     /// Write file to disk and add it to erase_queue
-    async fn write_file(&mut self, file_path: PathBuf, data: Vec<u8>) -> anyhow::Result<()> {
+    async fn write_file(&mut self, key: &str, data: Vec<u8>) -> anyhow::Result<()> {
+        let path = self.base_dir.join(key);
         let len = data.len() as u64;
-        fs::write(&file_path, data).await?;
+        fs::write(&path, data).await?;
         self.current_size += len;
-        let meta = fs::metadata(&file_path).await?;
-        self.erase_queue.push_back((file_path, meta));
+        let meta = fs::metadata(&path).await?;
+        self.erase_queue.push_back((path, meta));
         Ok(())
     }
 }
