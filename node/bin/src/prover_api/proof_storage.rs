@@ -262,19 +262,18 @@ impl BoundedFileStorage {
         if path.is_file() {
             tracing::info!("Storing old version of {}", key);
 
-            // Delete the file
-            let old_data = fs::read(&path).await?;
-            fs::remove_file(&path).await?;
-            self.current_size -= old_data.len() as u64;
-            *self.skip_cnt.entry(key.to_string()).or_insert(0) += 1;
-
-            // Save it again under a different name
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            self.write_file(&format!("{key}.overwritten_{now}"), old_data)
-                .await?;
+            let new_key = &format!("{key}.overwritten_{now}");
+            let new_path = self.base_dir.join(new_key);
+            // Mark corresponding entry as outdated
+            *self.skip_cnt.entry(key.to_string()).or_insert(0) += 1;
+            // Rename and add to the back of the queue
+            fs::rename(path, new_path.clone()).await?;
+            let meta = fs::metadata(&new_path).await?;
+            self.remove_queue.push_back((new_key.to_string(), meta));
         }
         Ok(())
     }
