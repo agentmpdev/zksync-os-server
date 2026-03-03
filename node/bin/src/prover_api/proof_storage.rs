@@ -155,25 +155,19 @@ impl BoundedFileStorage {
         while let Some(entry) = entries.next_entry().await? {
             let meta = entry.metadata().await?;
             if meta.is_file() {
-                let filename = entry.file_name().into_string();
-                if let Ok(filename) = filename {
-                    files.push((filename, meta));
-                } else {
-                    tracing::warn!(
+                match entry.file_name().into_string() {
+                    Ok(filename) => files.push((filename, meta)),
+                    Err(filename) => tracing::warn!(
                         "Unrelated file detected in {} ({}): the name cannot be represented using a String",
                         base_dir.display(),
-                        filename.err().unwrap().display()
-                    );
+                        filename.to_string_lossy(),
+                    ),
                 }
             }
         }
         files.sort_by_cached_key(|(_, meta)| meta.modified().unwrap_or(SystemTime::UNIX_EPOCH));
 
-        let mut current_size = 0_u64;
-        for (_, meta) in &files {
-            current_size += meta.len();
-        }
-
+        let current_size: u64 = files.iter().map(|(_, meta)| meta.len()).sum();
         let mut storage = Self {
             base_dir,
             capacity_bytes,
