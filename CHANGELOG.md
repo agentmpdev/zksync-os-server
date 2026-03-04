@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.17.0](https://github.com/matter-labs/zksync-os-server/compare/v0.16.0...v0.17.0) (2026-03-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* Commit encoding v4 support ([#899](https://github.com/matter-labs/zksync-os-server/issues/899))
+
+### Features
+
+* Bump zksync-os dev version ([#911](https://github.com/matter-labs/zksync-os-server/issues/911)) ([2bab2b8](https://github.com/matter-labs/zksync-os-server/commit/2bab2b8be287b882541d456a0cab26ab3407b336))
+* Commit encoding v4 support ([#899](https://github.com/matter-labs/zksync-os-server/issues/899)) ([f95ddbd](https://github.com/matter-labs/zksync-os-server/commit/f95ddbdc837b035bc944009ae4dfce47c5579e9d))
+* make operator signing keys optional for External Nodes ([#929](https://github.com/matter-labs/zksync-os-server/issues/929)) ([3894215](https://github.com/matter-labs/zksync-os-server/commit/38942150d7c9b8fe106ed5d3e9c136d435cae01c))
+* **merkle-tree:** Implement storage proofs for `zks_getProof` ([#904](https://github.com/matter-labs/zksync-os-server/issues/904)) ([eaa38d3](https://github.com/matter-labs/zksync-os-server/commit/eaa38d36818b6d64a11565b6032745c4afa2df12))
+* some gateway features ([#886](https://github.com/matter-labs/zksync-os-server/issues/886)) ([ba995d7](https://github.com/matter-labs/zksync-os-server/commit/ba995d72d24b41769439ab85966f667d8265294a))
+* update rustc version; use prover binary in test ([#901](https://github.com/matter-labs/zksync-os-server/issues/901)) ([2ca6c08](https://github.com/matter-labs/zksync-os-server/commit/2ca6c086a9974f97c1641cf75744af7099690d2c))
+
+
+### Bug Fixes
+
+* Compare block hash during block replay ([#918](https://github.com/matter-labs/zksync-os-server/issues/918)) ([039a9ba](https://github.com/matter-labs/zksync-os-server/commit/039a9ba38e08c11ae4be8c80691988b640b3e3fc))
+* rename aggregated root to multichain root ([#924](https://github.com/matter-labs/zksync-os-server/issues/924)) ([6cbc17b](https://github.com/matter-labs/zksync-os-server/commit/6cbc17b5886444284b12abc65640ba2fbe420a2d))
+* **rpc:** camelCase `batchNumber` is L2-&gt;L1 log proof ([#923](https://github.com/matter-labs/zksync-os-server/issues/923)) ([9f8bcdd](https://github.com/matter-labs/zksync-os-server/commit/9f8bcdd472af299615b08ea8718f98b3a67a853f))
+* **sequencer:** handle low-fee L2 transactions without stalling block production ([#927](https://github.com/matter-labs/zksync-os-server/issues/927)) ([c0d7385](https://github.com/matter-labs/zksync-os-server/commit/c0d73850edc30223af6965bc86f98408c3da6f37))
+* support 0x-prefixed hex in all config fields ([#931](https://github.com/matter-labs/zksync-os-server/issues/931)) ([a876bec](https://github.com/matter-labs/zksync-os-server/commit/a876becd96231a5a0b109f7ad5377310283482a1))
+
 ## [0.16.0](https://github.com/matter-labs/zksync-os-server/compare/v0.15.1...v0.16.0) (2026-02-25)
 
 
