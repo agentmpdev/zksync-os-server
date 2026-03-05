@@ -244,7 +244,7 @@ impl<ReadState: ReadStateHistory + Clone + Send + 'static> Batcher<ReadState> {
                     }
                 }, if deadline.is_some() => {
                     BATCHER_METRICS.seal_reason[&"timeout"].inc();
-                    tracing::debug!(batch_number, "Timeout reached, sealing the batch.");
+                    tracing::info!(batch_number, "Timeout reached, sealing the batch.");
                     break;
                 }
 

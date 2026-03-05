@@ -294,7 +294,7 @@ impl<ReplayStorage: ReadReplay, Finality: ReadFinality>
                 self.db
                     .cache_tree(&tree, last_block_number)
                     .context("failed to cache tree")?;
-                tracing::debug!(batch_number, "cached priority tree");
+                tracing::info!(batch_number, "cached priority tree");
             }
         }
     }

@@ -80,11 +80,11 @@ impl CompareReport {
     }
 
     /// Print a structured summary via `tracing`
-    /// - INFO when everything matches
+    /// - DEBUG when everything matches
     /// - WARN + INFO details when mismatches exist
     pub fn log_tracing(&self, max_show: usize) {
         if self.is_empty() {
-            tracing::info!(
+            tracing::debug!(
                 storage_mismatches = 0,
                 account_mismatches = 0,
                 "State diffs match"
