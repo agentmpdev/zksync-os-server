@@ -101,7 +101,7 @@ where
                 _ => false,
             };
 
-            tracing::debug!(
+            tracing::info!(
                 block_number,
                 cmd = cmd.to_string(),
                 "starting command. Turning into PreparedCommand.."
