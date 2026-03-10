@@ -15,6 +15,10 @@ use zksync_os_server::config::FeeConfig;
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn get_code(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node:
+    // * can fetch deployed bytecode at the latest block
+    // * can fetch deployed bytecode at the block where it was deployed
+    // * cannot fetch deployed bytecode before the block where it was deployed
     let deploy_tx_receipt = EventEmitter::deploy_builder(tester.l2_provider.clone())
         .send()
         .await?
@@ -57,18 +61,26 @@ async fn get_code(tester: Tester) -> anyhow::Result<()> {
 #[test_builder(|builder| builder.block_time(Duration::from_secs(5)))]
 #[test_log::test(tokio::test)]
 async fn get_transaction_count(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node takes pending mempool transactions into account for `eth_getTransactionCount`
+    // We set block time to 5 seconds to make sure that transaction spends >5 seconds in the mempool.
+    // This gives us time to check that the node returns the correct transaction count.
     let alice = tester.l2_wallet.default_signer().address();
     let l2_provider = &tester.l2_provider;
 
+    // No existing transactions yet at the start
     assert_eq!(l2_provider.get_transaction_count(alice).await?, 0);
 
     let deploy_pending_tx = EventEmitter::deploy_builder(l2_provider.clone())
         .send()
         .await?;
+    // Pending transaction count takes pending transaction into account, so it's 1
     assert_eq!(l2_provider.get_transaction_count(alice).pending().await?, 1);
+    // Latest transaction count is still 0
     assert_eq!(l2_provider.get_transaction_count(alice).latest().await?, 0);
+    // Omitting block id defaults to latest block
     assert_eq!(l2_provider.get_transaction_count(alice).await?, 0);
 
+    // Wait for the transaction to be mined and check that the transaction count is 1 now
     deploy_pending_tx.expect_successful_receipt().await?;
     assert_eq!(l2_provider.get_transaction_count(alice).pending().await?, 1);
     assert_eq!(l2_provider.get_transaction_count(alice).latest().await?, 1);
@@ -79,6 +91,7 @@ async fn get_transaction_count(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn get_net_version(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node returns correct chain ID in `net_version` RPC call
     let net_version = tester.l2_provider.get_net_version().await?;
     let chain_id = tester.l2_provider.get_chain_id().await?;
     assert_eq!(net_version, chain_id);
@@ -88,6 +101,7 @@ async fn get_net_version(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn get_client_version(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node returns sensible value in `web3_clientVersion` RPC call
     let client_version = tester.l2_provider.get_client_version().await?;
     let regex = Regex::new(r"^zksync-os/v(\d+)\.(\d+)\.(\d+)")?;
     assert!(regex.is_match(&client_version));
@@ -118,24 +132,31 @@ async fn get_gas_price_uses_configured_scale_factor(tester: Tester) -> anyhow::R
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn send_raw_transaction_sync(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node supports `eth_sendRawTransactionSync`
     let alice = tester.l2_wallet.default_signer().address();
     let fees = tester.l2_provider.estimate_eip1559_fees().await?;
+    // Create a transaction
     let tx = TransactionRequest::default()
         .to(alice)
         .value(U256::from(1))
         .nonce(0)
         .gas_price(fees.max_fee_per_gas)
         .gas_limit(50_000);
+    // Build and sign the transaction to get the envelope
     let tx_envelope = tx.build(&tester.l2_wallet).await?;
+    // Encode the transaction
     let encoded = tx_envelope.encoded_2718();
 
+    // Send using the sync method - this directly returns the receipt
     let receipt = tester
         .l2_provider
         .send_raw_transaction_sync(&encoded)
         .await?;
+    // Verify receipt
     assert!(receipt.status());
     assert_eq!(receipt.to(), Some(alice));
     assert!(receipt.block_number().is_some());
+    // The main idea that returned receipt should be already mined
     assert_ne!(receipt.transaction_hash(), TxHash::ZERO);
 
     Ok(())
@@ -144,17 +165,23 @@ async fn send_raw_transaction_sync(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn send_raw_transaction_sync_timeout(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node returns an error when `eth_sendRawTransactionSync` timeouts
     let alice = tester.l2_wallet.default_signer().address();
     let fees = tester.l2_provider.estimate_eip1559_fees().await?;
+    // Create a transaction
     let tx = TransactionRequest::default()
         .to(alice)
         .value(U256::from(1))
+        // !!! NOTE !!! - nonce gap
         .nonce(1)
         .gas_price(fees.max_fee_per_gas)
         .gas_limit(50_000);
+    // Build and sign the transaction to get the envelope
     let tx_envelope = tx.build(&tester.l2_wallet).await?;
+    // Encode the transaction
     let encoded = tx_envelope.encoded_2718();
 
+    // Send using the sync method - this directly returns the receipt
     let error = tester
         .l2_provider
         .send_raw_transaction_sync(&encoded)
@@ -185,7 +212,11 @@ async fn send_raw_transaction_sync_timeout(tester: Tester) -> anyhow::Result<()>
 })]
 #[test_log::test(tokio::test)]
 async fn estimate_gas_with_high_prices(tester: Tester) -> anyhow::Result<()> {
+    // Tests the estimations are accurate with high fee overrides.
+    // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
+    // Random address.
     let to = address!("0xa5d85D1D865F89a23A95d4F5F74850f289Dbc5f9");
+    // Create a transaction
     let tx = TransactionRequest::default().to(to).value(U256::ONE);
 
     let _gas = tester.l2_provider.estimate_gas(tx.clone()).await?;
@@ -202,13 +233,18 @@ async fn estimate_gas_with_high_prices(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn estimate_gas_without_balance(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can estimate transaction's gas even if sender does not have enough balance.
     let req = TransactionRequest::default()
         .to(address!("0xF8fF3e62E94807a5C687f418Fe36942dD3a24525"))
         .from(address!("0x38711eC715A5A32180427792Dc0e97f8E3303072"));
     let txs_requests = [
+        // no gas price fields are specified
         req.clone(),
+        // `gasPrice=0`
         req.clone().gas_price(0),
+        // `maxPriorityFeePerGas=0`
         req.clone().max_priority_fee_per_gas(0),
+        // `maxFeePerGas=0,maxPriorityFeePerGas=0`
         req.clone().max_fee_per_gas(0).max_priority_fee_per_gas(0),
     ];
     for tx_request in txs_requests {

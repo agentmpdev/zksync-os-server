@@ -34,6 +34,7 @@ async fn batch_verification_works(builder: TesterBuilder) -> anyhow::Result<()> 
         .expect_successful_receipt()
         .await?;
 
+    // Check batch is eventually finalized
     main_node
         .l2_zk_provider
         .wait_finalized_with_timeout(
@@ -57,12 +58,14 @@ async fn batch_verification_without_enough_ens(builder: TesterBuilder) -> anyhow
         })
         .await?;
 
+    // Do some random transaction
     let _deploy_tx_receipt = EventEmitter::deploy_builder(main_node.l2_provider.clone())
         .send()
         .await?
         .expect_successful_receipt()
         .await?;
 
+    // First block should not get finalized because EN with 2FA is needed.
     main_node
         .l2_zk_provider
         .wait_not_finalized(
@@ -87,6 +90,7 @@ async fn batch_verification_with_2_ens(builder: TesterBuilder) -> anyhow::Result
         })
         .await?;
 
+    // First block should not get finalized because 2 EN with 2FA are needed.
     main_node
         .l2_zk_provider
         .wait_not_finalized(
@@ -103,12 +107,14 @@ async fn batch_verification_with_2_ens(builder: TesterBuilder) -> anyhow::Result
         })
         .await?;
 
+    // Do some random transaction
     let deploy_tx_receipt = EventEmitter::deploy_builder(main_node.l2_provider.clone())
         .send()
         .await?
         .expect_successful_receipt()
         .await?;
 
+    // Should finalize everything because we have enough ENs now
     main_node
         .l2_zk_provider
         .wait_finalized_with_timeout(
@@ -189,6 +195,7 @@ async fn does_not_get_stuck(main_node: Tester) -> anyhow::Result<()> {
         check_contract_present(&en1, contract_address).await?;
     }
 
+    // Make sure we hold `main_node` until the end of the test
     drop(main_node);
 
     Ok(())
@@ -217,8 +224,10 @@ async fn forward_transactions(main_node: Tester) -> anyhow::Result<()> {
     let en = main_node.launch_external_node().await?;
     let alice = en.l2_wallet.default_signer().address();
 
+    // Alice's initial nonce
     let alice_nonce_before = en.l2_provider.get_transaction_count(alice).await?;
 
+    // Submit transaction to EN; we expect that transaction will be forwarded to the main node
     let pending_tx = en
         .l2_provider
         .send_transaction(
@@ -230,6 +239,7 @@ async fn forward_transactions(main_node: Tester) -> anyhow::Result<()> {
         .register()
         .await?;
 
+    // Alice's **pending** nonce after transaction was submitted
     let alice_nonce_mn_after = main_node
         .l2_provider
         .get_transaction_count(alice)
@@ -241,9 +251,12 @@ async fn forward_transactions(main_node: Tester) -> anyhow::Result<()> {
         .block_id(BlockId::pending())
         .await?;
 
+    // Main node is aware of the transaction because EN forwarded it
     assert_eq!(alice_nonce_mn_after, alice_nonce_before + 1);
+    // External node is aware of the transaction because it was saved to mempool
     assert_eq!(alice_nonce_en_after, alice_nonce_before + 1);
 
+    // Wait for tx to finalize and validate that both main and external nodes have identical receipt
     let tx_hash = pending_tx.await?;
     let mn_receipt = main_node
         .l2_provider

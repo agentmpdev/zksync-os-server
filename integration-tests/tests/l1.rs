@@ -20,11 +20,13 @@ use zksync_os_types::{
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn l1_deposit(tester: Tester) -> anyhow::Result<()> {
+    // Test that we can deposit L2 funds from a rich L1 account
     let alice = tester.l1_wallet().default_signer().address();
     let alice_l1_initial_balance = tester.l1_provider().get_balance(alice).await?;
     let alice_l2_initial_balance = tester.l2_provider.get_balance(alice).await?;
     let chain_id = tester.l2_provider.get_chain_id().await?;
 
+    // todo: copied over from alloy-zksync, use directly once it is EIP-712 agnostic
     let bridgehub = Bridgehub::new(
         tester.l2_zk_provider.get_bridgehub_contract().await?,
         tester.l1_provider().clone(),
@@ -98,11 +100,14 @@ async fn l1_deposit(tester: Tester) -> anyhow::Result<()> {
     assert_eq!(
         l2_to_l1_log,
         L2ToL1Log {
+            // L1Messenger's address
             l2_shard_id: 0,
             is_service: true,
             tx_number_in_block: receipt.transaction_index.unwrap() as u16,
             sender: Address::from_str("0x0000000000000000000000000000000000008001").unwrap(),
+            // Canonical tx hash
             key: l2_tx_hash,
+            // Successful
             value: B256::from(U256::from(1)),
         }
     );
@@ -121,6 +126,7 @@ async fn l1_deposit(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn l1_withdraw(tester: Tester) -> anyhow::Result<()> {
+    // Test that we can withdraw L2 funds to L1
     let alice = tester.l2_wallet.default_signer().address();
     let alice_l1_initial_balance = tester.l1_provider().get_balance(alice).await?;
     let alice_l2_initial_balance = tester.l2_provider.get_balance(alice).await?;

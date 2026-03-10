@@ -16,18 +16,24 @@ use zksync_os_server::config::FeeConfig;
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> {
+    // Test that mempool gets notified when an account's balance changes, hence potentially
+    // making that account's queued transactions minable.
+    // Alice is a rich account
     let alice = tester.l2_wallet.default_signer().address();
+    // Bob is an account with zero funds
     let bob_signer = PrivateKeySigner::random();
     let bob = bob_signer.address();
     tester
         .l2_provider
         .wallet_mut()
         .register_signer(bob_signer.clone());
+    // Make sure Bob has no funds at the start
     assert_eq!(tester.l2_provider.get_balance(bob).await?, U256::ZERO);
 
     let gas_price = tester.l2_provider.get_gas_price().await?;
     let gas_limit = 100_000;
     let value = U256::from(100);
+    // Prepare Bob's transaction with a nonce gap
     let bob_tx = TransactionRequest::default()
         .with_from(bob)
         .with_to(Address::random())
@@ -36,7 +42,9 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         .with_gas_limit(gas_limit)
         .with_nonce(1);
 
+    // This is what it will cost to execute Bob's legacy transaction
     let bob_tx_cost = U256::from(gas_limit) * U256::from(gas_price) + value;
+    // Since bob doesn't have enough, mempool should reject the transaction
     let error = tester
         .l2_provider
         .send_transaction(bob_tx.clone())
@@ -48,6 +56,7 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
             .contains("sender does not have enough funds")
     );
 
+    // Alice gives Bob enough for his transaction
     tester
         .l2_provider
         .send_transaction(
@@ -60,6 +69,7 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         .expect_successful_receipt()
         .await?;
 
+    // Now mempool should accept Bob's transaction
     let bob_receipt_fut = tester
         .l2_provider
         .send_transaction(bob_tx)
@@ -68,6 +78,7 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         .map(|res| res.expect("transaction should be successful"))
         .shared();
 
+    // But then Bob spends all of his funds on another transaction; note that nonce here is 0
     tester
         .l2_provider
         .send_transaction(
@@ -82,10 +93,12 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         .await?
         .expect_successful_receipt()
         .await?;
+    // Bob's second transaction is unminable because of the lack of funds in Bob's account
     tokio::time::timeout(std::time::Duration::from_secs(3), bob_receipt_fut.clone())
         .await
         .expect_err("transaction should timeout");
 
+    // Alice gives Bob enough for his second transaction
     tester
         .l2_provider
         .send_transaction(
@@ -97,11 +110,14 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         .await?
         .expect_successful_receipt()
         .await?;
+    // Bob's second transaction should be minable now
     bob_receipt_fut.await;
 
     Ok(())
 }
 
+/// A transaction with maxFeePerGas below the chain's base fee must not stall
+/// block production for other senders.
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_builder(|builder| {
     let known_base_fee: u128 = 100_000_000;
@@ -119,11 +135,13 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
 })]
 #[test_log::test(tokio::test)]
 async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::Result<()> {
-    let known_base_fee: u128 = 100_000_000;
+    // Use a deterministic base fee so the "low fee" value is unambiguous.
+    let known_base_fee: u128 = 100_000_000; // 100M wei = 0.1 gwei
 
     let alice = tester.l2_wallet.default_signer().address();
     let chain_id = tester.l2_provider.get_chain_id().await?;
 
+    // Step 1: Confirm baseline - chain is working
     tester
         .l2_provider
         .send_transaction(
@@ -135,6 +153,7 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
         .expect_successful_receipt()
         .await?;
 
+    // Step 2: Create Bob (independent sender) and fund him from Alice
     let bob_signer = PrivateKeySigner::random();
     let bob = bob_signer.address();
     tester.l2_provider.wallet_mut().register_signer(bob_signer);
@@ -144,19 +163,21 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
             TransactionRequest::default()
                 .with_from(alice)
                 .with_to(bob)
-                .with_value(U256::from(10u64.pow(18))),
+                .with_value(U256::from(10u64.pow(18))), // 1 ETH
         )
         .await?
         .expect_successful_receipt()
         .await?;
 
+    // Step 3: Submit a low-fee tx from Alice with maxFeePerGas=7 (far below base fee of 100M).
+    // Uses build() + send_raw_transaction() to bypass provider fee estimation.
     let nonce = tester.l2_provider.get_transaction_count(alice).await?;
     let poison_tx = TransactionRequest::default()
         .with_to(Address::random())
         .with_value(U256::from(1))
         .with_nonce(nonce)
         .with_gas_limit(21_000)
-        .with_max_fee_per_gas(7)
+        .with_max_fee_per_gas(7) // Above Reth MIN_PROTOCOL_BASE_FEE, far below actual base fee
         .with_max_priority_fee_per_gas(0)
         .with_chain_id(chain_id);
     let poison_envelope = poison_tx.build(&tester.l2_wallet).await?;
@@ -167,10 +188,12 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
         .await?;
 
     let block_before_wait = tester.l2_provider.get_block_number().await?;
+    // Give the block executor time to pick up the low-fee tx
     tokio::time::sleep(Duration::from_secs(2)).await;
     let block_after_wait = tester.l2_provider.get_block_number().await?;
     assert_eq!(block_after_wait, block_before_wait);
 
+    // Step 4: Send a legitimate follow-up from Bob (independent sender, no nonce dependency).
     let follow_up_tx = TransactionRequest::default()
         .with_from(bob)
         .with_to(Address::random())
@@ -187,7 +210,9 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
     .await;
 
     match result {
-        Ok(Ok(_receipt)) => {}
+        Ok(Ok(_receipt)) => {
+            // Block executor handled the low-fee tx gracefully - test passes
+        }
         Ok(Err(e)) => panic!("Follow-up transaction failed unexpectedly: {e:#}"),
         Err(_elapsed) => {
             panic!(

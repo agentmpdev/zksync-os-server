@@ -18,8 +18,16 @@ use zksync_os_integration_tests::{
 
 trait PubsubSuite: Sized {
     type Expected: RpcRecv + PartialEq;
+
+    /// Initialize the test suite with custom logic (e.g., this is where pre-requisite contracts are
+    /// deployed).
     async fn init(tester: &Tester) -> anyhow::Result<Self>;
+
+    /// Returns a new subscription with the L2 node.
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>>;
+
+    /// Run custom logic to change L2 node's state and hence make the subscription pick it up. Returns
+    /// an item expected to be seen in the subscription stream when polled next time.
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected>;
 }
 
@@ -49,6 +57,7 @@ impl PubsubSuite for NewBlockSuite {
         Ok(tester.l2_provider.subscribe_blocks().await?)
     }
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
+        // Submit a transaction and wait for it to get mined, thus producing a new block
         let receipt = tester
             .l2_provider
             .send_transaction(
@@ -59,6 +68,7 @@ impl PubsubSuite for NewBlockSuite {
             .await?
             .expect_successful_receipt()
             .await?;
+        // Get expected block header from JSON-RPC API
         let block = tester
             .l2_provider
             .get_block_by_hash(receipt.block_hash.expect("receipt has no block hash"))
@@ -109,6 +119,8 @@ impl PubsubSuite for PendingTxSuite<true> {
         let fees = tester.l2_provider.estimate_eip1559_fees().await?;
         let from = tester.l2_wallet.default_signer().address();
         let nonce = tester.l2_provider.get_transaction_count(from).await?;
+        // Build and sign transaction without L2 provider. This way we can reuse the envelope for
+        // the expected RPC type below.
         let tx_envelope = TransactionRequest::default()
             .with_to(Address::random())
             .with_value(U256::from(100))
@@ -149,6 +161,7 @@ impl PubsubSuite for NewLogsSuite {
         Ok(tester.l2_provider.subscribe_logs(&filter).await?)
     }
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
+        // Make `EventEmitter` emit `TestEvent` with the given number.
         let event_number = U256::from(42);
         let receipt = self
             .event_emitter
@@ -163,13 +176,13 @@ impl PubsubSuite for NewLogsSuite {
             .await?
             .expect("no block found");
 
+        let event = TestEvent {
+            number: event_number,
+        };
         Ok(Log {
             inner: alloy::primitives::Log {
                 address: *self.event_emitter.address(),
-                data: TestEvent {
-                    number: event_number,
-                }
-                .into_log_data(),
+                data: event.into_log_data(),
             },
             block_hash: receipt.block_hash,
             block_number: Some(block.header.number),
@@ -185,23 +198,27 @@ impl PubsubSuite for NewLogsSuite {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn new_block_pubsub(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_subscribe` can subscribe to new block headers
     run_test::<NewBlockSuite>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn pending_tx_hash_pubsub(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_subscribe` can subscribe to pending transaction hashes
     run_test::<PendingTxSuite<false>>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn pending_tx_full_pubsub(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_subscribe` can subscribe to pending transactions
     run_test::<PendingTxSuite<true>>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn new_log_pubsub(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_subscribe` can subscribe to new logs
     run_test::<NewLogsSuite>(tester).await
 }

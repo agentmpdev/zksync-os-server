@@ -14,6 +14,7 @@ mod upgrade;
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn basic_transfers(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can process 100 concurrent transfers to random accounts
     let alice = tester.l2_wallet.default_signer().address();
     let alice_balance_before = tester.l2_provider.get_balance(alice).await?;
 
@@ -39,6 +40,7 @@ async fn basic_transfers(tester: Tester) -> anyhow::Result<()> {
     }
     tracing::info!(elapsed = ?start.elapsed(), "confirmed final balances");
 
+    // Alice should've lost at least `deposit_amount * 100` ETH
     let alice_balance_after = tester.l2_provider.get_balance(alice).await?;
     assert!(alice_balance_after < alice_balance_before - deposit_amount * U256::from(100));
 
@@ -48,6 +50,7 @@ async fn basic_transfers(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn eip2930(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can process EIP-2930 transactions
     let tx = TransactionRequest::default()
         .from(tester.l2_wallet.default_signer().address())
         .to(Address::random())

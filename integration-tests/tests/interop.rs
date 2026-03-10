@@ -386,6 +386,7 @@ async fn test_interop_l2_to_l1_message_verification() -> anyhow::Result<()> {
 
     let multi_chain = GatewayTester::setup(2).await?;
 
+    // 3 chains: chain(0) is the gateway, chain_a() == chain(1), chain_b() == chain(2)
     let chain_a = multi_chain.chain_a();
     let chain_b = multi_chain.chain_b();
     let gateway = multi_chain.gateway();

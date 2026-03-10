@@ -15,9 +15,20 @@ use zksync_os_integration_tests::{
 
 trait FilterSuite: Sized {
     type Expected: RpcRecv + PartialEq;
+
+    /// Initialize the test suite with custom logic (e.g., this is where pre-requisite contracts are
+    /// deployed).
     async fn init(tester: &Tester) -> anyhow::Result<Self>;
+
+    /// Register a new filter with the L2 node. Returns its id.
     async fn create_filter(&self, tester: &Tester) -> anyhow::Result<U256>;
+
+    /// Run custom logic to change L2 node's state and hence make the filter pick it up. Returns
+    /// a change (as defined per `eth_getFilterChanges`) expected to be picked up by the filter after
+    /// this method's invocation.
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected>;
+
+    /// Run custom logic before filter is uninstalled.
     async fn before_uninstall_hook(
         &self,
         _tester: &Tester,
@@ -133,6 +144,8 @@ impl FilterSuite for PendingTxSuite<true> {
         let fees = tester.l2_provider.estimate_eip1559_fees().await?;
         let from = tester.l2_wallet.default_signer().address();
         let nonce = tester.l2_provider.get_transaction_count(from).await?;
+        // Build and sign transaction without L2 provider. This way we can reuse the envelope for
+        // the expected RPC type below.
         let tx_envelope = TransactionRequest::default()
             .with_to(Address::random())
             .with_value(U256::from(100))
@@ -187,13 +200,13 @@ impl FilterSuite for NewLogsSuite {
             .await?
             .expect("no block found");
 
+        let event = TestEvent {
+            number: event_number,
+        };
         Ok(Log {
             inner: alloy::primitives::Log {
                 address: *self.event_emitter.address(),
-                data: TestEvent {
-                    number: event_number,
-                }
-                .into_log_data(),
+                data: event.into_log_data(),
             },
             block_hash: receipt.block_hash,
             block_number: Some(block.header.number),
@@ -221,23 +234,29 @@ impl FilterSuite for NewLogsSuite {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn new_block_filter(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_newBlockFilter` picks up new canonized blocks
     run_test::<NewBlockSuite>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn pending_tx_hash_filter(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_newPendingTransactionFilter(full=false)` picks up new pending transactions' hashes
     run_test::<PendingTxSuite<false>>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn pending_tx_full_filter(tester: Tester) -> anyhow::Result<()> {
+    // Test that `eth_newPendingTransactionFilter(full=true)` picks up new pending transactions
     run_test::<PendingTxSuite<true>>(tester).await
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn new_log_filter(tester: Tester) -> anyhow::Result<()> {
+    // Test that:
+    // * `eth_newFilter` picks up new logs
+    // * `eth_getFilterLogs` returns all matching logs (regardless of what was already polled through `eth_getFilterChanges`)
     run_test::<NewLogsSuite>(tester).await
 }

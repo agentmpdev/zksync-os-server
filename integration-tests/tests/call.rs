@@ -14,6 +14,7 @@ use zksync_os_integration_tests::{
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_genesis(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can run `eth_call` on genesis
     tester
         .l2_provider
         .call(TransactionRequest::default())
@@ -25,6 +26,7 @@ async fn call_genesis(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_pending(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can run `eth_call` on pending block
     tester
         .l2_provider
         .call(TransactionRequest::default())
@@ -36,6 +38,8 @@ async fn call_pending(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_fail(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node responds with proper errors when `eth_call` fails
+    // Tx type errors
     tester
         .l2_provider
         .call(TransactionRequest {
@@ -56,12 +60,15 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
         })
         .expect_to_fail("EIP-7702 transactions are not supported")
         .await;
+    // Block not found errors
     tester
         .l2_provider
         .call(TransactionRequest::default())
+        // Very far ahead block
         .block((u32::MAX as u64).into())
         .expect_to_fail("block `0xffffffff` not found")
         .await;
+    // Fee errors
     tester
         .l2_provider
         .call(TransactionRequest {
@@ -106,6 +113,7 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
         })
         .expect_to_fail("`maxPriorityFeePerGas` is too high")
         .await;
+    // Missing field errors
     tester
         .l2_provider
         .call(TransactionRequest {
@@ -121,6 +129,7 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_deploy(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node can run `eth_call` with contract deployment
     let result = EventEmitter::deploy_builder(tester.l2_provider.clone())
         .call()
         .await?;
@@ -131,7 +140,9 @@ async fn call_deploy(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_revert(tester: Tester) -> anyhow::Result<()> {
+    // Test that the node returns error on reverting `eth_call`
     let simple_revert = SimpleRevert::deploy(tester.l2_provider.clone()).await?;
+    // Custom error is returned as accompanying data
     let error = simple_revert
         .simpleRevert()
         .call_raw()
@@ -142,6 +153,7 @@ async fn call_revert(tester: Tester) -> anyhow::Result<()> {
         error,
         "server returned an error response: error code 3: execution reverted, data: \"0xc2bb947c\""
     );
+    // String reverts are parsed out as a revert reason
     let error = simple_revert
         .stringRevert()
         .call_raw()
@@ -159,14 +171,20 @@ async fn call_revert(tester: Tester) -> anyhow::Result<()> {
 #[test_casing([CURRENT_TO_L1, NEXT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn call_with_state_overrides(tester: Tester) -> anyhow::Result<()> {
+    // Deploy a dummy contract with storage at slot 0, call it to read the value,
+    // then call again with a state override for slot 0 and expect a different result.
     let initial_data = U256::from(1);
+    // Deploy TracingSecondary with `data = 1` stored at slot 0
     let contract = TracingSecondary::deploy(tester.l2_provider.clone(), initial_data).await?;
+    // Build a TransactionRequest for multiply(1) -> returns the storage-backed value
     let tx_req = contract.multiply(U256::from(1)).into_transaction_request();
 
+    // Baseline call without overrides (should return 1)
     let out = tester.l2_provider.call(tx_req.clone()).await?;
     let baseline = U256::from_be_slice(&out);
     assert_eq!(baseline, initial_data);
 
+    // Prepare state override via JSON to match expected types: set slot 0 to 2
     let overrides = StateOverride::from_iter([(
         *contract.address(),
         AccountOverride {
@@ -182,6 +200,7 @@ async fn call_with_state_overrides(tester: Tester) -> anyhow::Result<()> {
         },
     )]);
 
+    // Call again with the override; expect 2 now
     let out_overridden = tester.l2_provider.call(tx_req).overrides(overrides).await?;
     let overridden = U256::from_be_slice(&out_overridden);
     assert_eq!(overridden, U256::from(2));
