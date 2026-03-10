@@ -8,38 +8,27 @@ use alloy::rpc::types::{Filter, Header, Log, Transaction, TransactionRequest};
 use alloy::sol_types::SolEvent;
 use futures::StreamExt;
 use tokio::time::error::Elapsed;
-use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::contracts::EventEmitter;
 use zksync_os_integration_tests::contracts::EventEmitter::{EventEmitterInstance, TestEvent};
 use zksync_os_integration_tests::dyn_wallet_provider::EthDynProvider;
+use zksync_os_integration_tests::{TestCase, Tester, integration_test_matrix};
 
 trait PubsubSuite: Sized {
     type Expected: RpcRecv + PartialEq;
-
-    /// Initialize the test suite with custom logic (e.g., this is where pre-requisite contracts are
-    /// deployed).
     async fn init(tester: &Tester) -> anyhow::Result<Self>;
-
-    /// Returns a new subscription with the L2 node.
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>>;
-
-    /// Run custom logic to change L2 node's state and hence make the subscription pick it up. Returns
-    /// an item expected to be seen in the subscription stream when polled next time.
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected>;
 }
 
-async fn run_test<S: PubsubSuite>() -> anyhow::Result<()> {
-    let tester = Tester::setup().await?;
+async fn run_test<S: PubsubSuite>(case: TestCase) -> anyhow::Result<()> {
+    let tester = case.setup().await?;
     let suite = S::init(&tester).await?;
     let mut stream = suite.subscribe(&tester).await?.into_stream();
     let expected_item = suite.prepare_expected(&tester).await?;
 
     let actual_item = stream.next().await.expect("stream ended unexpectedly");
-    assert_eq!(
-        actual_item, expected_item,
-        "next item in stream should match expected item"
-    );
+    assert_eq!(actual_item, expected_item);
 
     let _: Elapsed = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
         .await
@@ -52,17 +41,13 @@ struct NewBlockSuite;
 
 impl PubsubSuite for NewBlockSuite {
     type Expected = Header;
-
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(NewBlockSuite)
     }
-
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester.l2_provider.subscribe_blocks().await?)
     }
-
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
-        // Submit a transaction and wait for it to get mined, thus producing a new block
         let receipt = tester
             .l2_provider
             .send_transaction(
@@ -73,12 +58,9 @@ impl PubsubSuite for NewBlockSuite {
             .await?
             .expect_successful_receipt()
             .await?;
-
-        // Get expected block header from JSON-RPC API
-        let block_hash = receipt.block_hash.expect("receipt has no block hash");
         let block = tester
             .l2_provider
-            .get_block_by_hash(block_hash)
+            .get_block_by_hash(receipt.block_hash.expect("receipt has no block hash"))
             .hashes()
             .await?
             .expect("could not retrieve block header");
@@ -90,15 +72,12 @@ struct PendingTxSuite<const FULL: bool>;
 
 impl PubsubSuite for PendingTxSuite<false> {
     type Expected = TxHash;
-
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
-
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester.l2_provider.subscribe_pending_transactions().await?)
     }
-
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let pending_tx = tester
             .l2_provider
@@ -116,24 +95,19 @@ impl PubsubSuite for PendingTxSuite<false> {
 
 impl PubsubSuite for PendingTxSuite<true> {
     type Expected = Transaction;
-
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
-
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester
             .l2_provider
             .subscribe_full_pending_transactions()
             .await?)
     }
-
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let fees = tester.l2_provider.estimate_eip1559_fees().await?;
         let from = tester.l2_wallet.default_signer().address();
         let nonce = tester.l2_provider.get_transaction_count(from).await?;
-        // Build and sign transaction without L2 provider. This way we can reuse the envelope for
-        // the expected RPC type below.
         let tx_envelope = TransactionRequest::default()
             .with_to(Address::random())
             .with_value(U256::from(100))
@@ -150,11 +124,10 @@ impl PubsubSuite for PendingTxSuite<true> {
             .await?
             .expect_register()
             .await?;
-        let transaction = Transaction::from_transaction(
+        Ok(Transaction::from_transaction(
             Recovered::new_unchecked(tx_envelope, tester.l2_wallet.default_signer().address()),
             TransactionInfo::default(),
-        );
-        Ok(transaction)
+        ))
     }
 }
 
@@ -164,21 +137,17 @@ struct NewLogsSuite {
 
 impl PubsubSuite for NewLogsSuite {
     type Expected = Log;
-
     async fn init(tester: &Tester) -> anyhow::Result<Self> {
         let event_emitter = EventEmitter::deploy(tester.l2_provider.clone()).await?;
         Ok(NewLogsSuite { event_emitter })
     }
-
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         let filter = Filter::new()
             .address(*self.event_emitter.address())
             .event_signature(TestEvent::SIGNATURE_HASH);
         Ok(tester.l2_provider.subscribe_logs(&filter).await?)
     }
-
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
-        // Make `EventEmitter` emit `TestEvent` with the given number.
         let event_number = U256::from(42);
         let receipt = self
             .event_emitter
@@ -193,13 +162,13 @@ impl PubsubSuite for NewLogsSuite {
             .await?
             .expect("no block found");
 
-        let event = TestEvent {
-            number: event_number,
-        };
         Ok(Log {
             inner: alloy::primitives::Log {
                 address: *self.event_emitter.address(),
-                data: event.into_log_data(),
+                data: TestEvent {
+                    number: event_number,
+                }
+                .into_log_data(),
             },
             block_hash: receipt.block_hash,
             block_number: Some(block.header.number),
@@ -212,26 +181,26 @@ impl PubsubSuite for NewLogsSuite {
     }
 }
 
-#[test_log::test(tokio::test)]
-async fn new_block_pubsub() -> anyhow::Result<()> {
-    // Test that `eth_subscribe` can subscribe to new block headers
-    run_test::<NewBlockSuite>().await
-}
+integration_test_matrix!(
+    #[test_log::test(tokio::test)]
+    new_block_pubsub,
+    |case| async move { run_test::<NewBlockSuite>(case).await }
+);
 
-#[test_log::test(tokio::test)]
-async fn pending_tx_hash_pubsub() -> anyhow::Result<()> {
-    // Test that `eth_subscribe` can subscribe to pending transaction hashes
-    run_test::<PendingTxSuite<false>>().await
-}
+integration_test_matrix!(
+    #[test_log::test(tokio::test)]
+    pending_tx_hash_pubsub,
+    |case| async move { run_test::<PendingTxSuite<false>>(case).await }
+);
 
-#[test_log::test(tokio::test)]
-async fn pending_tx_full_pubsub() -> anyhow::Result<()> {
-    // Test that `eth_subscribe` can subscribe to pending transactions
-    run_test::<PendingTxSuite<true>>().await
-}
+integration_test_matrix!(
+    #[test_log::test(tokio::test)]
+    pending_tx_full_pubsub,
+    |case| async move { run_test::<PendingTxSuite<true>>(case).await }
+);
 
-#[test_log::test(tokio::test)]
-async fn new_log_pubsub() -> anyhow::Result<()> {
-    // Test that `eth_subscribe` can subscribe to new logs
-    run_test::<NewLogsSuite>().await
-}
+integration_test_matrix!(
+    #[test_log::test(tokio::test)]
+    new_log_pubsub,
+    |case| async move { run_test::<NewLogsSuite>(case).await }
+);
