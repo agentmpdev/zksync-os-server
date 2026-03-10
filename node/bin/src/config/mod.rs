@@ -427,6 +427,7 @@ pub struct RpcConfig {
     pub send_raw_transaction_sync_timeout: Duration,
 
     /// Factor applied to the pending block base fee returned by `eth_gasPrice`.
+    /// Some tools, e.g. Metamask, submit transactions with `maxFeePerGas=eth_gasPrice`, so it's important for multiplier to be `> 1`.
     #[config(default_t = 1.5)]
     pub gas_price_scale_factor: f64,
 
