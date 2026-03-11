@@ -13,9 +13,7 @@ use zksync_os_integration_tests::contracts::TestERC20::TestERC20Instance;
 use zksync_os_integration_tests::contracts::{IL2AssetRouter, L1AssetRouter, TestERC20};
 use zksync_os_integration_tests::dyn_wallet_provider::EthDynProvider;
 use zksync_os_integration_tests::provider::ZksyncApi;
-use zksync_os_integration_tests::{
-    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing,
-};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
 use zksync_os_types::{L2ToL1Log, REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_BYTE, ZkTxType};
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]

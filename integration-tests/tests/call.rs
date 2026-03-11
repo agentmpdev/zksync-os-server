@@ -7,9 +7,7 @@ use alloy::rpc::types::state::{AccountOverride, StateOverride};
 use std::collections::HashMap;
 use zksync_os_integration_tests::assert_traits::EthCallAssert;
 use zksync_os_integration_tests::contracts::{EventEmitter, SimpleRevert, TracingSecondary};
-use zksync_os_integration_tests::{
-    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing,
-};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]

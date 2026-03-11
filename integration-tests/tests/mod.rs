@@ -5,9 +5,7 @@ use alloy::providers::Provider;
 use alloy::rpc::types::{AccessListItem, TransactionRequest};
 use tokio::time::Instant;
 use zksync_os_integration_tests::assert_traits::{ReceiptAssert, ReceiptsAssert};
-use zksync_os_integration_tests::{
-    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing,
-};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
 
 mod upgrade;
 

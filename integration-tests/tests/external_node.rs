@@ -10,8 +10,8 @@ use backon::{ConstantBuilder, Retryable};
 use zksync_os_integration_tests::BATCH_VERIFICATION_KEYS;
 use zksync_os_integration_tests::provider::ZksyncTestingProvider;
 use zksync_os_integration_tests::{
-    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, TesterBuilder,
-    assert_traits::ReceiptAssert, contracts::EventEmitter, test_casing,
+    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, TesterBuilder, assert_traits::ReceiptAssert,
+    contracts::EventEmitter, test_casing,
 };
 use zksync_os_server::config::Config;
 
