@@ -34,6 +34,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use zksync_os_contract_interface::Bridgehub;
 use zksync_os_contract_interface::IMailbox::NewPriorityRequest;
+use zksync_os_contract_interface::l1_discovery::L1State;
 use zksync_os_network::NodeRecord;
 use zksync_os_server::config::{
     BatchVerificationConfig, Config, FakeFriProversConfig, FakeSnarkProversConfig, FeeConfig,
@@ -756,12 +757,12 @@ impl GatewayTester {
 
     /// Get chain A (first chain)
     pub fn chain_a(&self) -> &Tester {
-        self.chain(1)
+        self.chain(0)
     }
 
     /// Get chain B (second chain)
     pub fn chain_b(&self) -> &Tester {
-        self.chain(2)
+        self.chain(1)
     }
 
     pub fn gateway(&self) -> &Tester {
@@ -828,20 +829,18 @@ impl GatewayTesterBuilder {
         .await?;
         let gateway_rpc_url = gateway.l2_rpc_url().to_owned();
 
-        if num_chains > 0 {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-
         let mut chains = Vec::with_capacity(num_chains);
         for i in 0..num_chains {
             let chain_layout = ChainLayout::GatewayChain {
                 protocol_version,
                 chain_index: i,
             };
-            let chain_id = load_chain_config(chain_layout)
+            let chain_config = load_chain_config(chain_layout);
+            let chain_id = chain_config
                 .genesis_config
                 .chain_id
                 .expect("Chain ID must be set in chain config");
+            wait_for_gateway_readiness(&l1, &gateway, &chain_config).await?;
             let gateway_rpc_url = gateway_rpc_url.clone();
             let chain_options = self.chain_options.clone();
             let tester = Tester::launch_node(
@@ -867,10 +866,6 @@ impl GatewayTesterBuilder {
             );
 
             chains.push(tester);
-
-            if i + 1 < num_chains {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
         }
 
         Ok(GatewayTester {
@@ -879,6 +874,52 @@ impl GatewayTesterBuilder {
             chains,
         })
     }
+}
+
+async fn wait_for_gateway_readiness(
+    l1: &AnvilL1,
+    gateway: &Tester,
+    chain_config: &Config,
+) -> anyhow::Result<()> {
+    let chain_id = chain_config
+        .genesis_config
+        .chain_id
+        .context("chain config is missing genesis chain_id")?;
+    let bridgehub_address = chain_config
+        .genesis_config
+        .bridgehub_address
+        .context("chain config is missing bridgehub_address")?;
+
+    (|| async {
+        let gateway_provider = ProviderBuilder::new()
+            .connect(gateway.l2_rpc_url())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to connect to gateway RPC at {}",
+                    gateway.l2_rpc_url()
+                )
+            })?;
+
+        L1State::fetch(
+            DynProvider::new(l1.provider.clone()),
+            DynProvider::new(gateway_provider),
+            bridgehub_address,
+            chain_id,
+        )
+        .await
+        .with_context(|| format!("gateway is not ready for chain {chain_id}"))?;
+        anyhow::Ok(())
+    })
+    .retry(
+        ConstantBuilder::default()
+            .with_delay(Duration::from_millis(200))
+            .with_max_times(300),
+    )
+    .notify(|err: &anyhow::Error, dur: Duration| {
+        tracing::info!(chain_id, %err, ?dur, "retrying gateway readiness check");
+    })
+    .await
 }
 
 #[derive(Debug, Clone)]
