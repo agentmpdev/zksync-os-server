@@ -35,7 +35,10 @@ async fn run_test<S: PubsubSuite>(tester: Tester) -> anyhow::Result<()> {
     let expected_item = suite.prepare_expected(&tester).await?;
 
     let actual_item = stream.next().await.expect("stream ended unexpectedly");
-    assert_eq!(actual_item, expected_item);
+    assert_eq!(
+        actual_item, expected_item,
+        "next item in stream should match expected item"
+    );
 
     let _: Elapsed = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
         .await
@@ -48,12 +51,15 @@ struct NewBlockSuite;
 
 impl PubsubSuite for NewBlockSuite {
     type Expected = Header;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(NewBlockSuite)
     }
+
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester.l2_provider.subscribe_blocks().await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         // Submit a transaction and wait for it to get mined, thus producing a new block
         let receipt = tester
@@ -67,9 +73,10 @@ impl PubsubSuite for NewBlockSuite {
             .expect_successful_receipt()
             .await?;
         // Get expected block header from JSON-RPC API
+        let block_hash = receipt.block_hash.expect("receipt has no block hash");
         let block = tester
             .l2_provider
-            .get_block_by_hash(receipt.block_hash.expect("receipt has no block hash"))
+            .get_block_by_hash(block_hash)
             .hashes()
             .await?
             .expect("could not retrieve block header");
@@ -81,12 +88,15 @@ struct PendingTxSuite<const FULL: bool>;
 
 impl PubsubSuite for PendingTxSuite<false> {
     type Expected = TxHash;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
+
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester.l2_provider.subscribe_pending_transactions().await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let pending_tx = tester
             .l2_provider
@@ -104,15 +114,18 @@ impl PubsubSuite for PendingTxSuite<false> {
 
 impl PubsubSuite for PendingTxSuite<true> {
     type Expected = Transaction;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
+
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         Ok(tester
             .l2_provider
             .subscribe_full_pending_transactions()
             .await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let fees = tester.l2_provider.estimate_eip1559_fees().await?;
         let from = tester.l2_wallet.default_signer().address();
@@ -135,10 +148,11 @@ impl PubsubSuite for PendingTxSuite<true> {
             .await?
             .expect_register()
             .await?;
-        Ok(Transaction::from_transaction(
+        let transaction = Transaction::from_transaction(
             Recovered::new_unchecked(tx_envelope, tester.l2_wallet.default_signer().address()),
             TransactionInfo::default(),
-        ))
+        );
+        Ok(transaction)
     }
 }
 
@@ -148,16 +162,19 @@ struct NewLogsSuite {
 
 impl PubsubSuite for NewLogsSuite {
     type Expected = Log;
+
     async fn init(tester: &Tester) -> anyhow::Result<Self> {
         let event_emitter = EventEmitter::deploy(tester.l2_provider.clone()).await?;
         Ok(NewLogsSuite { event_emitter })
     }
+
     async fn subscribe(&self, tester: &Tester) -> anyhow::Result<Subscription<Self::Expected>> {
         let filter = Filter::new()
             .address(*self.event_emitter.address())
             .event_signature(TestEvent::SIGNATURE_HASH);
         Ok(tester.l2_provider.subscribe_logs(&filter).await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         // Make `EventEmitter` emit `TestEvent` with the given number.
         let event_number = U256::from(42);

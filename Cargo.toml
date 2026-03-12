@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "integration-tests-macros",
     "lib/contract_interface",
     "lib/crypto",
     "lib/genesis",
@@ -21,6 +20,7 @@ members = [
     "lib/types",
     "node/bin",
     "integration-tests",
+    "integration-tests-macros",
     "tools/generate-deposit",
     "lib/observability",
     "lib/state_full_diffs",

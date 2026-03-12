@@ -20,28 +20,41 @@ use zksync_os_types::{L2ToL1Log, REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_BYTE, ZkTxTyp
 #[test_log::test(tokio::test)]
 async fn erc20_deposit(tester: Tester) -> anyhow::Result<()> {
     let alice = tester.l1_wallet().default_signer().address();
+
+    // Mint ERC20 tokens on L1 for Alice
     let mint_amount = U256::from(100u64);
     let deposit_amount = U256::from(40u64);
-    // Mint ERC20 tokens on L1 for Alice
     let l1_erc20 = deploy_l1_token_and_mint(&tester, mint_amount).await?;
 
-    assert_eq!(l1_erc20.balanceOf(alice).call().await?, mint_amount);
+    let alice_l1_initial_balance = l1_erc20.balanceOf(alice).call().await?;
+    assert_eq!(
+        alice_l1_initial_balance, mint_amount,
+        "Unexpected initial L1 balance"
+    );
 
     // Send deposit.
     let l1_deposit_receipt = deposit_erc20(&tester, &l1_erc20, alice, deposit_amount).await?;
+
     // Check that the L2 part of the deposit was successful.
     assert_successful_deposit_l2_part(&tester, l1_deposit_receipt).await?;
 
-    // `l2_erc20` is not exactly `TestERC20`, but it implements standard `ERC20` interface.
     let l2_erc20_address = l2_token_address(&tester, *l1_erc20.address()).await?;
+    // `l2_erc20` is not exactly `TestERC20`, but it implements standard `ERC20` interface.
     let l2_erc20 = TestERC20::new(l2_erc20_address, tester.l2_provider.clone());
     // Check Alice's L2 balance.
     let l2_balance = l2_erc20.balanceOf(alice).call().await?;
-    assert_eq!(l2_balance, deposit_amount);
+    assert_eq!(
+        l2_balance, deposit_amount,
+        "Unexpected L2 balance after deposit"
+    );
 
     // Check Alice's L1 balance.
     let l1_balance = l1_erc20.balanceOf(alice).call().await?;
-    assert_eq!(l1_balance, mint_amount - deposit_amount);
+    assert_eq!(
+        l1_balance,
+        mint_amount - deposit_amount,
+        "Unexpected L1 balance after deposit"
+    );
 
     Ok(())
 }
@@ -54,17 +67,17 @@ async fn erc20_transfer(tester: Tester) -> anyhow::Result<()> {
     let bob_signer = PrivateKeySigner::random();
     let bob = bob_signer.address();
 
+    // Deposit some ERC20 tokens to L2 for Alice to be able to transfer them.
     let mint_amount = U256::from(100u64);
     let l1_erc20 = deploy_l1_token_and_mint(&tester, mint_amount).await?;
-    // Deposit some ERC20 tokens to L2 for Alice to be able to transfer them.
     let l1_deposit_receipt = deposit_erc20(&tester, &l1_erc20, alice, mint_amount).await?;
     assert_successful_deposit_l2_part(&tester, l1_deposit_receipt).await?;
 
     let l2_erc20_address = l2_token_address(&tester, *l1_erc20.address()).await?;
     let l2_erc20 = TestERC20::new(l2_erc20_address, tester.l2_provider.clone());
 
-    let transfer_amount = U256::from(40u64);
     // Transfer some tokens from Alice to Bob on L2.
+    let transfer_amount = U256::from(40u64);
     l2_erc20
         .transfer(bob, transfer_amount)
         .from(alice)
@@ -73,12 +86,20 @@ async fn erc20_transfer(tester: Tester) -> anyhow::Result<()> {
         .expect_successful_receipt()
         .await?;
 
+    // Check balances.
     let alice_l2_balance = l2_erc20.balanceOf(alice).call().await?;
     let bob_l2_balance = l2_erc20.balanceOf(bob).call().await?;
 
-    // Check balances.
-    assert_eq!(alice_l2_balance, mint_amount - transfer_amount);
-    assert_eq!(bob_l2_balance, transfer_amount);
+    assert_eq!(
+        alice_l2_balance,
+        mint_amount - transfer_amount,
+        "Unexpected Alice's L2 balance after transfer"
+    );
+
+    assert_eq!(
+        bob_l2_balance, transfer_amount,
+        "Unexpected Bob's L2 balance after transfer"
+    );
 
     Ok(())
 }
@@ -89,9 +110,9 @@ async fn erc20_withdrawal(tester: Tester) -> anyhow::Result<()> {
     // We use L2 wallet's default signer as Alice because it already has L2 ETH.
     let alice = tester.l2_wallet.default_signer().address();
 
+    // Deposit some ERC20 tokens to L2.
     let mint_amount = U256::from(100u64);
     let l1_erc20 = deploy_l1_token_and_mint(&tester, mint_amount).await?;
-    // Deposit some ERC20 tokens to L2.
     let l1_deposit_receipt = deposit_erc20(&tester, &l1_erc20, alice, mint_amount).await?;
     assert_successful_deposit_l2_part(&tester, l1_deposit_receipt).await?;
 
@@ -101,8 +122,8 @@ async fn erc20_withdrawal(tester: Tester) -> anyhow::Result<()> {
     let l2_asset_router =
         IL2AssetRouter::new(l2_asset_router_address, tester.l2_zk_provider.clone());
 
-    let withdraw_amount = U256::from(40u64);
     // Request withdrawal on L2.
+    let withdraw_amount = U256::from(40u64);
     let l2_receipt = l2_asset_router
         .withdraw(alice, l2_erc20_address, withdraw_amount)
         .send()
@@ -115,12 +136,20 @@ async fn erc20_withdrawal(tester: Tester) -> anyhow::Result<()> {
     let l1_nullifier = l1_asset_router.l1_nullifier().await?;
     l1_nullifier.finalize_withdrawal(l2_receipt).await?;
 
+    // Check balances.
     let l1_balance = l1_erc20.balanceOf(alice).call().await?;
     let l2_balance = l2_erc20.balanceOf(alice).call().await?;
 
-    // Check balances.
-    assert_eq!(l1_balance, withdraw_amount);
-    assert_eq!(l2_balance, mint_amount - withdraw_amount);
+    assert_eq!(
+        l1_balance, withdraw_amount,
+        "Unexpected Alice's L1 balance after withdrawal"
+    );
+
+    assert_eq!(
+        l2_balance,
+        mint_amount - withdraw_amount,
+        "Unexpected Alice's L2 balance after withdrawal"
+    );
 
     Ok(())
 }
@@ -210,12 +239,14 @@ async fn deposit_erc20(
         .into_transaction_request();
 
     // Send deposit request and wait for it to be processed on L2.
-    tester
+    let l1_deposit_receipt = tester
         .l1_provider()
         .send_transaction(deposit_request)
         .await?
         .expect_successful_receipt()
-        .await
+        .await?;
+
+    Ok(l1_deposit_receipt)
 }
 
 async fn assert_successful_deposit_l2_part(
@@ -234,10 +265,18 @@ async fn assert_successful_deposit_l2_part(
     let receipt = PendingTransactionBuilder::new(tester.l2_zk_provider.root().clone(), l2_tx_hash)
         .expect_successful_receipt()
         .await?;
-    assert_eq!(receipt.inner.tx_type(), ZkTxType::L1);
+    assert_eq!(
+        receipt.inner.tx_type(),
+        ZkTxType::L1,
+        "expected L1->L2 deposit to produce an L1->L2 priority transaction"
+    );
 
     let mut l2_to_l1_logs = receipt.inner.l2_to_l1_logs().to_vec();
-    assert_eq!(l2_to_l1_logs.len(), 1);
+    assert_eq!(
+        l2_to_l1_logs.len(),
+        1,
+        "expected L1->L2 deposit transaction to only produce one L2->L1 log"
+    );
     let l2_to_l1_log: L2ToL1Log = l2_to_l1_logs.remove(0).into();
     assert_eq!(
         l2_to_l1_log,
@@ -251,7 +290,8 @@ async fn assert_successful_deposit_l2_part(
             key: l2_tx_hash,
             // Successful
             value: B256::from(U256::from(1)),
-        }
+        },
+        "expected L1->L2 deposit log to mark canonical tx hash as successful"
     );
 
     Ok(())
@@ -260,5 +300,7 @@ async fn assert_successful_deposit_l2_part(
 async fn l2_token_address(tester: &Tester, l1_token: Address) -> anyhow::Result<Address> {
     let l2_asset_router_address = address!("0x0000000000000000000000000000000000010003");
     let l2_asset_router = IL2AssetRouter::new(l2_asset_router_address, tester.l2_provider.clone());
-    Ok(l2_asset_router.l2TokenAddress(l1_token).call().await?)
+    let l2_erc20_address = l2_asset_router.l2TokenAddress(l1_token).call().await?;
+
+    Ok(l2_erc20_address)
 }

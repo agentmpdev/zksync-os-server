@@ -14,8 +14,8 @@ use zksync_os_contract_interface::Bridgehub;
 use zksync_os_contract_interface::IMailbox::NewPriorityRequest;
 use zksync_os_integration_tests::assert_traits::ProviderAssert;
 use zksync_os_integration_tests::{
-    GatewayTester, NEXT_TO_GATEWAY, Tester, assert_traits::ReceiptAssert, contracts::TestERC20,
-    provider::ZksyncApi, test_casing,
+    GatewayTester, Tester, assert_traits::ReceiptAssert, contracts::TestERC20,
+    provider::ZksyncApi,
 };
 use zksync_os_rpc_api::types::LogProofTarget;
 use zksync_os_types::{L1PriorityTxType, L1TxType, REQUIRED_L1_TO_L2_GAS_PER_PUBDATA_BYTE};
@@ -376,7 +376,6 @@ async fn fund_wallet_via_l1_deposit(tester: &Tester, wallet: Address, amount: U2
     Ok(())
 }
 
-#[test_casing([NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
 async fn test_interop_l2_to_l1_message_verification() -> anyhow::Result<()> {
     // 1. Send an L2->L1 message ("hello interop") on chain A
@@ -387,7 +386,6 @@ async fn test_interop_l2_to_l1_message_verification() -> anyhow::Result<()> {
     // 2 L2 chains + gateway.
     let multi_chain = GatewayTester::setup(2).await?;
 
-    // 3 chains: chain(0) is the gateway, chain_a() == chain(1), chain_b() == chain(2)
     let chain_a = multi_chain.chain_a();
     let chain_b = multi_chain.chain_b();
     let gateway = multi_chain.gateway();

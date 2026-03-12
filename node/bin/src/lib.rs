@@ -50,7 +50,7 @@ use jsonrpsee::http_client::HttpClient;
 use ruint::aliases::U256;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use zksync_os_base_token_adjuster::BaseTokenPriceUpdater;
@@ -107,23 +107,6 @@ const PRIORITY_TREE_DB_NAME: &str = "priority_txs_tree";
 const REPOSITORY_DB_NAME: &str = "repository";
 const BATCH_DB_NAME: &str = "batch";
 pub const INTERNAL_CONFIG_FILE_NAME: &str = "internal_config.json";
-const L1_STATE_FETCH_RETRY_DELAY: Duration = Duration::from_millis(250);
-const L1_STATE_FETCH_MAX_ATTEMPTS: usize = 1;
-
-fn error_chain_contains(err: &anyhow::Error, needle: &str) -> bool {
-    err.chain().any(|cause| cause.to_string().contains(needle))
-}
-
-fn is_retryable_l1_state_fetch_error(err: &anyhow::Error, on_gateway: bool) -> bool {
-    let transient_network_error = error_chain_contains(err, "Connection refused")
-        || error_chain_contains(err, "error sending request");
-    let gateway_not_ready_error = on_gateway
-        && (error_chain_contains(err, "is not registered on SL")
-            || error_chain_contains(err, "SL is not whitelisted on L1 Bridgehub")
-            || error_chain_contains(err, "returned no data")
-            || error_chain_contains(err, "might not be a contract"));
-    transient_network_error || gateway_not_ready_error
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone>(
@@ -206,57 +189,25 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         .map(|_| sl_provider.clone());
 
     tracing::info!("Reading L1 state");
-    let on_gateway = config.general_config.gateway_rpc_url.is_some();
-    let l1_state = {
-        let mut attempt = 0usize;
-        loop {
-            attempt += 1;
-            let result = if node_role.is_main() {
-                // On the main node, we need to wait for the pending L1 transactions (commit/prove/execute)
-                // to be mined before proceeding.
-                L1State::fetch_finalized(
-                    l1_provider.clone().erased(),
-                    sl_provider.clone().erased(),
-                    bridgehub_address,
-                    chain_id,
-                )
-                .await
-            } else {
-                L1State::fetch(
-                    l1_provider.clone().erased(),
-                    sl_provider.clone().erased(),
-                    bridgehub_address,
-                    chain_id,
-                )
-                .await
-            };
-
-            match result {
-                Ok(l1_state) => break l1_state,
-                Err(err)
-                    if attempt < L1_STATE_FETCH_MAX_ATTEMPTS
-                        && is_retryable_l1_state_fetch_error(&err, on_gateway) =>
-                {
-                    tracing::warn!(
-                        %err,
-                        attempt,
-                        max_attempts = L1_STATE_FETCH_MAX_ATTEMPTS,
-                        delay = ?L1_STATE_FETCH_RETRY_DELAY,
-                        "failed to fetch L1 state, retrying"
-                    );
-                    tokio::time::sleep(L1_STATE_FETCH_RETRY_DELAY).await;
-                }
-                Err(err) => {
-                    if node_role.is_main() {
-                        panic!(
-                            "failed to fetch finalized L1 state after {attempt} attempt(s): {err:#}"
-                        );
-                    } else {
-                        panic!("failed to fetch L1 state after {attempt} attempt(s): {err:#}");
-                    }
-                }
-            }
-        }
+    let l1_state = if node_role.is_main() {
+        // On the main node, we need to wait for the pending L1 transactions (commit/prove/execute) to be mined before proceeding.
+        L1State::fetch_finalized(
+            l1_provider.clone().erased(),
+            sl_provider.clone().erased(),
+            bridgehub_address,
+            chain_id,
+        )
+        .await
+        .expect("failed to fetch finalized L1 state")
+    } else {
+        L1State::fetch(
+            l1_provider.clone().erased(),
+            sl_provider.clone().erased(),
+            bridgehub_address,
+            chain_id,
+        )
+        .await
+        .expect("failed to fetch L1 state")
     };
     tracing::info!(?l1_state, "L1 state");
     l1_state.report_metrics();

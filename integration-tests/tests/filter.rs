@@ -46,13 +46,20 @@ async fn run_test<S: FilterSuite>(tester: Tester) -> anyhow::Result<()> {
         .l2_provider
         .get_filter_changes::<S::Expected>(filter_id)
         .await?;
-    assert!(actual_changes.contains(&expected_change));
+    tracing::debug!(?expected_change, ?actual_changes, "comparing changes");
+    assert!(
+        actual_changes.contains(&expected_change),
+        "filter changes do not contain expected element"
+    );
 
     let extra_changes = tester
         .l2_provider
         .get_filter_changes::<S::Expected>(filter_id)
         .await?;
-    assert!(extra_changes.is_empty());
+    assert!(
+        extra_changes.is_empty(),
+        "filter should not pick up any extra changes after suite is over"
+    );
 
     suite
         .before_uninstall_hook(&tester, filter_id, expected_change)
@@ -63,13 +70,19 @@ async fn run_test<S: FilterSuite>(tester: Tester) -> anyhow::Result<()> {
         .get_filter_changes::<S::Expected>(filter_id)
         .await
         .expect_err("filter should be uninstalled");
-    assert!(err.to_string().contains("filter not found"));
+    assert!(
+        err.to_string().contains("filter not found"),
+        "`eth_getFilterChanges` should report uninstalled filter as not found"
+    );
     let err = tester
         .l2_provider
         .get_filter_logs(filter_id)
         .await
         .expect_err("filter should be uninstalled");
-    assert!(err.to_string().contains("filter not found"));
+    assert!(
+        err.to_string().contains("filter not found"),
+        "`eth_getFilterLogs` should report uninstalled filter as not found"
+    );
 
     Ok(())
 }
@@ -78,12 +91,15 @@ struct NewBlockSuite;
 
 impl FilterSuite for NewBlockSuite {
     type Expected = BlockHash;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(NewBlockSuite)
     }
+
     async fn create_filter(&self, tester: &Tester) -> anyhow::Result<U256> {
         Ok(tester.l2_provider.new_block_filter().await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let receipt = tester
             .l2_provider
@@ -103,15 +119,18 @@ struct PendingTxSuite<const FULL: bool>;
 
 impl FilterSuite for PendingTxSuite<false> {
     type Expected = TxHash;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
+
     async fn create_filter(&self, tester: &Tester) -> anyhow::Result<U256> {
         Ok(tester
             .l2_provider
             .new_pending_transactions_filter(false)
             .await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let pending_tx = tester
             .l2_provider
@@ -129,15 +148,18 @@ impl FilterSuite for PendingTxSuite<false> {
 
 impl FilterSuite for PendingTxSuite<true> {
     type Expected = Transaction;
+
     async fn init(_tester: &Tester) -> anyhow::Result<Self> {
         Ok(PendingTxSuite)
     }
+
     async fn create_filter(&self, tester: &Tester) -> anyhow::Result<U256> {
         Ok(tester
             .l2_provider
             .new_pending_transactions_filter(true)
             .await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let fees = tester.l2_provider.estimate_eip1559_fees().await?;
         let from = tester.l2_wallet.default_signer().address();
@@ -160,10 +182,11 @@ impl FilterSuite for PendingTxSuite<true> {
             .await?
             .expect_register()
             .await?;
-        Ok(Transaction::from_transaction(
+        let transaction = Transaction::from_transaction(
             Recovered::new_unchecked(tx_envelope, tester.l2_wallet.default_signer().address()),
             TransactionInfo::default(),
-        ))
+        );
+        Ok(transaction)
     }
 }
 
@@ -173,16 +196,19 @@ struct NewLogsSuite {
 
 impl FilterSuite for NewLogsSuite {
     type Expected = Log;
+
     async fn init(tester: &Tester) -> anyhow::Result<Self> {
         let event_emitter = EventEmitter::deploy(tester.l2_provider.clone()).await?;
         Ok(NewLogsSuite { event_emitter })
     }
+
     async fn create_filter(&self, tester: &Tester) -> anyhow::Result<U256> {
         let filter = Filter::new()
             .address(*self.event_emitter.address())
             .event_signature(TestEvent::SIGNATURE_HASH);
         Ok(tester.l2_provider.new_filter(&filter).await?)
     }
+
     async fn prepare_expected(&self, tester: &Tester) -> anyhow::Result<Self::Expected> {
         let event_number = U256::from(42);
         let receipt = self
@@ -215,6 +241,7 @@ impl FilterSuite for NewLogsSuite {
             removed: false,
         })
     }
+
     async fn before_uninstall_hook(
         &self,
         tester: &Tester,
@@ -222,9 +249,16 @@ impl FilterSuite for NewLogsSuite {
         expected: Self::Expected,
     ) -> anyhow::Result<()> {
         let logs = tester.l2_provider.get_filter_logs(filter_id).await?;
-        assert!(logs.contains(&expected));
+        assert!(
+            logs.contains(&expected),
+            "`eth_getFilterLogs` should contain the log too"
+        );
         let logs = tester.l2_provider.get_filter_logs(filter_id).await?;
-        assert!(logs.contains(&expected));
+        assert!(
+            logs.contains(&expected),
+            "`eth_getFilterLogs` should return the log again when called for second time"
+        );
+
         Ok(())
     }
 }

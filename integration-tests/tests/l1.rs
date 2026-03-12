@@ -91,9 +91,17 @@ async fn l1_deposit(tester: Tester) -> anyhow::Result<()> {
     let receipt = PendingTransactionBuilder::new(tester.l2_zk_provider.root().clone(), l2_tx_hash)
         .expect_successful_receipt()
         .await?;
-    assert_eq!(receipt.inner.tx_type(), ZkTxType::L1);
+    assert_eq!(
+        receipt.inner.tx_type(),
+        ZkTxType::L1,
+        "expected L1->L2 deposit to produce an L1->L2 priority transaction"
+    );
     let mut l2_to_l1_logs = receipt.inner.l2_to_l1_logs().to_vec();
-    assert_eq!(l2_to_l1_logs.len(), 1);
+    assert_eq!(
+        l2_to_l1_logs.len(),
+        1,
+        "expected L1->L2 deposit transaction to only produce one L2->L1 log"
+    );
     let l2_to_l1_log: L2ToL1Log = l2_to_l1_logs.remove(0).into();
     assert_eq!(
         l2_to_l1_log,
@@ -107,7 +115,8 @@ async fn l1_deposit(tester: Tester) -> anyhow::Result<()> {
             key: l2_tx_hash,
             // Successful
             value: B256::from(U256::from(1)),
-        }
+        },
+        "expected L1->L2 deposit log to mark canonical tx hash as successful"
     );
 
     let fee = U256::from(l1_deposit_receipt.effective_gas_price)

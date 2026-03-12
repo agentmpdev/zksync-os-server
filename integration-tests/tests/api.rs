@@ -7,7 +7,7 @@ use regex::Regex;
 use std::time::Duration;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::contracts::EventEmitter;
-use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing, TesterBuilder};
 use zksync_os_server::config::FeeConfig;
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
@@ -27,7 +27,11 @@ async fn get_code(tester: Tester) -> anyhow::Result<()> {
         .expect("no contract deployed");
 
     let latest_code = tester.l2_provider.get_code_at(contract_address).await?;
-    assert_eq!(latest_code, EventEmitter::DEPLOYED_BYTECODE);
+    assert_eq!(
+        latest_code,
+        EventEmitter::DEPLOYED_BYTECODE,
+        "deployed bytecode mismatch at latest block"
+    );
     let at_block_code = tester
         .l2_provider
         .get_code_at(contract_address)
@@ -38,7 +42,11 @@ async fn get_code(tester: Tester) -> anyhow::Result<()> {
                 .into(),
         )
         .await?;
-    assert_eq!(at_block_code, EventEmitter::DEPLOYED_BYTECODE);
+    assert_eq!(
+        at_block_code,
+        EventEmitter::DEPLOYED_BYTECODE,
+        "deployed bytecode mismatch at deployed block"
+    );
     let before_block_code = tester
         .l2_provider
         .get_code_at(contract_address)
@@ -50,7 +58,10 @@ async fn get_code(tester: Tester) -> anyhow::Result<()> {
             .into(),
         )
         .await?;
-    assert!(before_block_code.is_empty());
+    assert!(
+        before_block_code.is_empty(),
+        "deployed bytecode is not empty before deploy block"
+    );
 
     Ok(())
 }
@@ -107,7 +118,8 @@ async fn get_client_version(tester: Tester) -> anyhow::Result<()> {
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
-#[test_builder(|builder| {
+#[test_log::test(tokio::test)]
+async fn get_gas_price_uses_configured_scale_factor(builder: TesterBuilder) -> anyhow::Result<()> {
     let known_base_fee: u128 = 100_000_000;
     let fee_config = FeeConfig {
         native_price_usd: 3e-9,
@@ -117,12 +129,14 @@ async fn get_client_version(tester: Tester) -> anyhow::Result<()> {
         native_price_override: Some(U128::from(1_000_000u64)),
         pubdata_price_cap: None,
     };
-    builder.fee_config(fee_config).gas_price_scale_factor(2.0)
-})]
-#[test_log::test(tokio::test)]
-async fn get_gas_price_uses_configured_scale_factor(tester: Tester) -> anyhow::Result<()> {
+    let tester = builder
+        .fee_config(fee_config)
+        .gas_price_scale_factor(2.0)
+        .build()
+        .await?;
+
     let gas_price = tester.l2_provider.get_gas_price().await?;
-    assert_eq!(gas_price, 200_000_000);
+    assert_eq!(gas_price, 2 * known_base_fee);
 
     Ok(())
 }
@@ -150,12 +164,20 @@ async fn send_raw_transaction_sync(tester: Tester) -> anyhow::Result<()> {
         .l2_provider
         .send_raw_transaction_sync(&encoded)
         .await?;
-    // Verify receipt
     assert!(receipt.status());
+
+    // Verify receipt
     assert_eq!(receipt.to(), Some(alice));
-    assert!(receipt.block_number().is_some());
     // The main idea that returned receipt should be already mined
-    assert_ne!(receipt.transaction_hash(), TxHash::ZERO);
+    assert!(
+        receipt.block_number().is_some(),
+        "transaction should be mined"
+    );
+    assert_ne!(
+        receipt.transaction_hash(),
+        TxHash::ZERO,
+        "should have valid tx hash"
+    );
 
     Ok(())
 }
@@ -195,35 +217,39 @@ async fn send_raw_transaction_sync_timeout(tester: Tester) -> anyhow::Result<()>
 }
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
-#[test_builder(|builder| {
+#[test_log::test(tokio::test)]
+async fn estimate_gas_with_high_prices(builder: TesterBuilder) -> anyhow::Result<()> {
+    // Tests the estimations are accurate with high fee overrides.
+    // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
     let fee_config = FeeConfig {
-        native_price_usd: 3e-9,
+        native_price_usd: 3e-9, // doesn't matter
         pubdata_price_override: Some(U128::from(10_000_000_000_000u64)),
         native_price_override: Some(U128::from(1_000_000u64)),
         base_fee_override: Some(U128::from(100_000_000u64)),
-        native_per_gas: 100,
+        native_per_gas: 100, // doesn't matter
         pubdata_price_cap: None,
     };
-    builder
+    let tester = builder
         .fee_config(fee_config)
         .estimate_gas_pubdata_price_factor(1.0)
-})]
-#[test_log::test(tokio::test)]
-async fn estimate_gas_with_high_prices(tester: Tester) -> anyhow::Result<()> {
-    // Tests the estimations are accurate with high fee overrides.
-    // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
+        .build()
+        .await?;
+
     // Random address.
     let to = address!("0xa5d85D1D865F89a23A95d4F5F74850f289Dbc5f9");
     // Create a transaction
     let tx = TransactionRequest::default().to(to).value(U256::ONE);
 
-    let _gas = tester.l2_provider.estimate_gas(tx.clone()).await?;
-    tester
+    let gas = tester.l2_provider.estimate_gas(tx.clone()).await?;
+    tracing::info!("Estimated gas: {gas}");
+
+    let receipt = tester
         .l2_provider
         .send_transaction(tx)
         .await?
         .expect_successful_receipt()
         .await?;
+    tracing::info!("Got receipt, gas used: {}", receipt.gas_used);
 
     Ok(())
 }
@@ -245,8 +271,9 @@ async fn estimate_gas_without_balance(tester: Tester) -> anyhow::Result<()> {
         // `maxFeePerGas=0,maxPriorityFeePerGas=0`
         req.clone().max_fee_per_gas(0).max_priority_fee_per_gas(0),
     ];
-    for tx_request in txs_requests {
-        let _estimated_gas = tester.l2_provider.estimate_gas(tx_request).await?;
+    for (i, tx_request) in txs_requests.into_iter().enumerate() {
+        let estimated_gas = tester.l2_provider.estimate_gas(tx_request).await?;
+        tracing::info!("Estimated gas for tx #{i}: {estimated_gas}");
     }
     Ok(())
 }

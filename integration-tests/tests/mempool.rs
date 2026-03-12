@@ -8,7 +8,7 @@ use futures::FutureExt;
 use std::time::Duration;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::dyn_wallet_provider::EthWalletProvider;
-use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing, TesterBuilder};
 use zksync_os_server::config::FeeConfig;
 
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
@@ -117,8 +117,10 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
 /// A transaction with maxFeePerGas below the chain's base fee must not stall
 /// block production for other senders.
 #[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
-#[test_builder(|builder| {
-    let known_base_fee: u128 = 100_000_000;
+#[test_log::test(tokio::test)]
+async fn low_fee_tx_does_not_hang_block_executor(builder: TesterBuilder) -> anyhow::Result<()> {
+    // Use a deterministic base fee so the "low fee" value is unambiguous.
+    let known_base_fee: u128 = 100_000_000; // 100M wei = 0.1 gwei
     let fee_config = FeeConfig {
         native_price_usd: 3e-9,
         base_fee_override: Some(U128::from(known_base_fee)),
@@ -127,14 +129,11 @@ async fn sensitive_to_balance_changes(mut tester: Tester) -> anyhow::Result<()> 
         native_price_override: Some(U128::from(1_000_000u64)),
         pubdata_price_cap: None,
     };
-    builder
+    let mut tester = builder
         .fee_config(fee_config)
         .block_time(Duration::from_millis(500))
-})]
-#[test_log::test(tokio::test)]
-async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::Result<()> {
-    // Use a deterministic base fee so the "low fee" value is unambiguous.
-    let known_base_fee: u128 = 100_000_000; // 100M wei = 0.1 gwei
+        .build()
+        .await?;
 
     let alice = tester.l2_wallet.default_signer().address();
     let chain_id = tester.l2_provider.get_chain_id().await?;
@@ -186,10 +185,15 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
         .await?;
 
     let block_before_wait = tester.l2_provider.get_block_number().await?;
+
     // Give the block executor time to pick up the low-fee tx
     tokio::time::sleep(Duration::from_secs(2)).await;
+
     let block_after_wait = tester.l2_provider.get_block_number().await?;
-    assert_eq!(block_after_wait, block_before_wait);
+    assert_eq!(
+        block_after_wait, block_before_wait,
+        "Low-fee tx alone should not progress block production"
+    );
 
     // Step 4: Send a legitimate follow-up from Bob (independent sender, no nonce dependency).
     let follow_up_tx = TransactionRequest::default()
@@ -211,10 +215,14 @@ async fn low_fee_tx_does_not_hang_block_executor(mut tester: Tester) -> anyhow::
         Ok(Ok(_receipt)) => {
             // Block executor handled the low-fee tx gracefully - test passes
         }
-        Ok(Err(e)) => panic!("Follow-up transaction failed unexpectedly: {e:#}"),
+        Ok(Err(e)) => {
+            panic!("Follow-up transaction failed unexpectedly: {e:#}");
+        }
         Err(_elapsed) => {
             panic!(
-                "Follow-up transaction not mined within 30s. The low-fee tx (maxFeePerGas=7, baseFee={known_base_fee}) appears to have stalled block production for other senders."
+                "Follow-up transaction not mined within 30s. \
+                 The low-fee tx (maxFeePerGas=7, baseFee={known_base_fee}) \
+                 appears to have stalled block production for other senders."
             );
         }
     }

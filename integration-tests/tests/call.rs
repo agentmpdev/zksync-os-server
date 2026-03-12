@@ -37,6 +37,7 @@ async fn call_pending(tester: Tester) -> anyhow::Result<()> {
 #[test_log::test(tokio::test)]
 async fn call_fail(tester: Tester) -> anyhow::Result<()> {
     // Test that the node responds with proper errors when `eth_call` fails
+
     // Tx type errors
     tester
         .l2_provider
@@ -60,6 +61,7 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
         })
         .expect_to_fail("EIP-7702 transactions are not supported")
         .await;
+
     // Block not found errors
     tester
         .l2_provider
@@ -68,6 +70,7 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
         .block((u32::MAX as u64).into())
         .expect_to_fail("block `0xffffffff` not found")
         .await;
+
     // Fee errors
     tester
         .l2_provider
@@ -96,6 +99,7 @@ async fn call_fail(tester: Tester) -> anyhow::Result<()> {
         })
         .expect_to_fail("`maxPriorityFeePerGas` higher than `maxFeePerGas`")
         .await;
+
     tester
         .l2_provider
         .call(TransactionRequest {
@@ -173,9 +177,11 @@ async fn call_revert(tester: Tester) -> anyhow::Result<()> {
 async fn call_with_state_overrides(tester: Tester) -> anyhow::Result<()> {
     // Deploy a dummy contract with storage at slot 0, call it to read the value,
     // then call again with a state override for slot 0 and expect a different result.
-    let initial_data = U256::from(1);
+
     // Deploy TracingSecondary with `data = 1` stored at slot 0
+    let initial_data = U256::from(1);
     let contract = TracingSecondary::deploy(tester.l2_provider.clone(), initial_data).await?;
+
     // Build a TransactionRequest for multiply(1) -> returns the storage-backed value
     let tx_req = contract.multiply(U256::from(1)).into_transaction_request();
 
