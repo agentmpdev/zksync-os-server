@@ -10,10 +10,10 @@ use alloy::rpc::types::trace::geth::{
 };
 use alloy::sol_types::{Revert, SolCall, SolError};
 use std::collections::HashMap;
-use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::{ReceiptAssert, ReceiptsAssert};
 use zksync_os_integration_tests::contracts::{EventEmitter, TracingPrimary, TracingSecondary};
 use zksync_os_integration_tests::dyn_wallet_provider::EthDynProvider;
+use zksync_os_integration_tests::{CURRENT_TO_L1, Tester, test_casing};
 
 fn check_call_frame(
     call_frame: CallFrame,
@@ -73,10 +73,10 @@ fn check_call_frame(
     );
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_trace_transaction() -> anyhow::Result<()> {
+async fn call_trace_transaction(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can call trace an existing transaction. Manually asserts call trace output.
-    let tester = Tester::setup().await?;
     let alice = tester.l2_wallet.default_signer().address();
     // Init data for `TracingSecondary`
     let secondary_data = U256::from(42);
@@ -266,10 +266,10 @@ fn strip_call_frame(call_frame: &CallFrame) -> CallFrame {
     call_frame
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_trace_transaction_equivalency() -> anyhow::Result<()> {
+async fn call_trace_transaction_equivalency(tester: Tester) -> anyhow::Result<()> {
     // Test that the node call traces are equivalent to L1 traces (produced by anvil).
-    let tester = Tester::setup().await?;
     // Init data for `TracingSecondary`
     let secondary_data = U256::from(42);
     // Call value for `TracingPrimary::multiCalculate`
@@ -297,10 +297,10 @@ async fn call_trace_transaction_equivalency() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_trace_equivalency() -> anyhow::Result<()> {
+async fn call_trace_equivalency(tester: Tester) -> anyhow::Result<()> {
     // Test that the `debug_traceCall` output is equivalent to L1 output (as produced by anvil).
-    let tester = Tester::setup().await?;
     // Init data for `TracingSecondary`
     let secondary_data = U256::from(42);
     // Call value for `TracingPrimary::multiCalculate`
@@ -327,10 +327,10 @@ async fn call_trace_equivalency() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_trace_block() -> anyhow::Result<()> {
+async fn call_trace_block(tester: Tester) -> anyhow::Result<()> {
     // Test that the node call traces are equivalent to L1 traces (produced by anvil).
-    let tester = Tester::setup().await?;
     let alice = tester.l2_wallet.default_signer().address();
     // Init data for `TracingSecondary`
     let secondary_data = U256::from(42);
@@ -418,10 +418,9 @@ async fn call_trace_block() -> anyhow::Result<()> {
     }
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn debug_trace_call_js_tracer() -> anyhow::Result<()> {
-    let tester = Tester::setup().await?;
-
+async fn debug_trace_call_js_tracer(tester: Tester) -> anyhow::Result<()> {
     let secondary_data = U256::from(7);
     let calculate_value = U256::from(3);
     let secondary_contract =
@@ -480,10 +479,9 @@ async fn debug_trace_call_js_tracer() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn debug_trace_call_js_tracer_with_db() -> anyhow::Result<()> {
-    let tester = Tester::setup().await?;
-
+async fn debug_trace_call_js_tracer_with_db(tester: Tester) -> anyhow::Result<()> {
     let secondary_data = U256::from(7);
     let calculate_value = U256::from(3);
     let secondary_contract =
@@ -544,10 +542,9 @@ async fn debug_trace_call_js_tracer_with_db() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn debug_trace_call_stack() -> anyhow::Result<()> {
-    let tester = Tester::setup().await?;
-
+async fn debug_trace_call_stack(tester: Tester) -> anyhow::Result<()> {
     let secondary_data = U256::from(7);
     let calculate_value = U256::from(3);
     let secondary_contract =

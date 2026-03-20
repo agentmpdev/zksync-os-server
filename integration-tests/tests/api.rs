@@ -5,19 +5,20 @@ use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use regex::Regex;
 use std::time::Duration;
-use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::ReceiptAssert;
 use zksync_os_integration_tests::contracts::EventEmitter;
+use zksync_os_integration_tests::{
+    CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, TesterBuilder, test_casing,
+};
 use zksync_os_server::config::FeeConfig;
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn get_code() -> anyhow::Result<()> {
+async fn get_code(tester: Tester) -> anyhow::Result<()> {
     // Test that the node:
     // * can fetch deployed bytecode at the latest block
     // * can fetch deployed bytecode at the block where it was deployed
     // * cannot fetch deployed bytecode before the block where it was deployed
-    let tester = Tester::setup().await?;
-
     let deploy_tx_receipt = EventEmitter::deploy_builder(tester.l2_provider.clone())
         .send()
         .await?
@@ -67,15 +68,13 @@ async fn get_code() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
+#[test_builder(|builder| builder.block_time(Duration::from_secs(5)))]
 #[test_log::test(tokio::test)]
-async fn get_transaction_count() -> anyhow::Result<()> {
+async fn get_transaction_count(tester: Tester) -> anyhow::Result<()> {
     // Test that the node takes pending mempool transactions into account for `eth_getTransactionCount`
     // We set block time to 5 seconds to make sure that transaction spends >5 seconds in the mempool.
     // This gives us time to check that the node returns the correct transaction count.
-    let tester = Tester::builder()
-        .block_time(Duration::from_secs(5))
-        .build()
-        .await?;
     let alice = tester.l2_wallet.default_signer().address();
     let l2_provider = &tester.l2_provider;
 
@@ -100,28 +99,29 @@ async fn get_transaction_count() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn get_net_version() -> anyhow::Result<()> {
+async fn get_net_version(tester: Tester) -> anyhow::Result<()> {
     // Test that the node returns correct chain ID in `net_version` RPC call
-    let tester = Tester::setup().await?;
     let net_version = tester.l2_provider.get_net_version().await?;
     let chain_id = tester.l2_provider.get_chain_id().await?;
     assert_eq!(net_version, chain_id);
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn get_client_version() -> anyhow::Result<()> {
+async fn get_client_version(tester: Tester) -> anyhow::Result<()> {
     // Test that the node returns sensible value in `web3_clientVersion` RPC call
-    let tester = Tester::setup().await?;
     let client_version = tester.l2_provider.get_client_version().await?;
     let regex = Regex::new(r"^zksync-os/v(\d+)\.(\d+)\.(\d+)")?;
     assert!(regex.is_match(&client_version));
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn get_gas_price_uses_configured_scale_factor() -> anyhow::Result<()> {
+async fn get_gas_price_uses_configured_scale_factor(builder: TesterBuilder) -> anyhow::Result<()> {
     let known_base_fee: u128 = 100_000_000;
     let fee_config = FeeConfig {
         native_price_usd: 3e-9,
@@ -131,23 +131,22 @@ async fn get_gas_price_uses_configured_scale_factor() -> anyhow::Result<()> {
         native_price_override: Some(U128::from(1_000_000u64)),
         pubdata_price_cap: None,
     };
-    let tester = Tester::builder()
+    let tester = builder
         .fee_config(fee_config)
         .gas_price_scale_factor(2.0)
         .build()
         .await?;
 
     let gas_price = tester.l2_provider.get_gas_price().await?;
-    assert_eq!(gas_price, 200_000_000);
+    assert_eq!(gas_price, 2 * known_base_fee);
 
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
-async fn send_raw_transaction_sync() -> anyhow::Result<()> {
+async fn send_raw_transaction_sync(tester: Tester) -> anyhow::Result<()> {
     // Test that the node supports `eth_sendRawTransactionSync`
-    let tester = Tester::builder().build().await?;
-
     let alice = tester.l2_wallet.default_signer().address();
     let fees = tester.l2_provider.estimate_eip1559_fees().await?;
     // Create a transaction
@@ -185,11 +184,10 @@ async fn send_raw_transaction_sync() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn send_raw_transaction_sync_timeout() -> anyhow::Result<()> {
+async fn send_raw_transaction_sync_timeout(tester: Tester) -> anyhow::Result<()> {
     // Test that the node returns an error when `eth_sendRawTransactionSync` timeouts
-    let tester = Tester::builder().build().await?;
-
     let alice = tester.l2_wallet.default_signer().address();
     let fees = tester.l2_provider.estimate_eip1559_fees().await?;
     // Create a transaction
@@ -220,8 +218,9 @@ async fn send_raw_transaction_sync_timeout() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn estimate_gas_with_high_prices() -> anyhow::Result<()> {
+async fn estimate_gas_with_high_prices(builder: TesterBuilder) -> anyhow::Result<()> {
     // Tests the estimations are accurate with high fee overrides.
     // Following config has high pubdata price, that makes base token transfer to take >21000 gas.
     let fee_config = FeeConfig {
@@ -232,7 +231,7 @@ async fn estimate_gas_with_high_prices() -> anyhow::Result<()> {
         native_per_gas: 100, // doesn't matter
         pubdata_price_cap: None,
     };
-    let tester = Tester::builder()
+    let tester = builder
         .fee_config(fee_config)
         .estimate_gas_pubdata_price_factor(1.0)
         .build()
@@ -257,10 +256,10 @@ async fn estimate_gas_with_high_prices() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn estimate_gas_without_balance() -> anyhow::Result<()> {
+async fn estimate_gas_without_balance(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can estimate transaction's gas even if sender does not have enough balance.
-    let tester = Tester::setup().await?;
     let req = TransactionRequest::default()
         .to(address!("0xF8fF3e62E94807a5C687f418Fe36942dD3a24525"))
         .from(address!("0x38711eC715A5A32180427792Dc0e97f8E3303072"));

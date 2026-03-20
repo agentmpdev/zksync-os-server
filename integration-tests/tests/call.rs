@@ -1,18 +1,18 @@
-use alloy::consensus::BlobTransactionSidecar;
+use alloy::consensus::{BlobTransactionSidecar, BlobTransactionSidecarVariant};
 use alloy::eips::BlockId;
 use alloy::primitives::{U256, b256};
 use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use alloy::rpc::types::state::{AccountOverride, StateOverride};
 use std::collections::HashMap;
-use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::EthCallAssert;
 use zksync_os_integration_tests::contracts::{EventEmitter, SimpleRevert, TracingSecondary};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
 
+#[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
-async fn call_genesis() -> anyhow::Result<()> {
+async fn call_genesis(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can run `eth_call` on genesis
-    let tester = Tester::setup().await?;
     tester
         .l2_provider
         .call(TransactionRequest::default())
@@ -21,10 +21,10 @@ async fn call_genesis() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
-async fn call_pending() -> anyhow::Result<()> {
+async fn call_pending(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can run `eth_call` on pending block
-    let tester = Tester::setup().await?;
     tester
         .l2_provider
         .call(TransactionRequest::default())
@@ -33,20 +33,22 @@ async fn call_pending() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_fail() -> anyhow::Result<()> {
+async fn call_fail(tester: Tester) -> anyhow::Result<()> {
     // Test that the node responds with proper errors when `eth_call` fails
-    let tester = Tester::setup().await?;
 
     // Tx type errors
     tester
         .l2_provider
         .call(TransactionRequest {
-            sidecar: Some(BlobTransactionSidecar {
-                blobs: vec![],
-                commitments: vec![],
-                proofs: vec![],
-            }),
+            sidecar: Some(BlobTransactionSidecarVariant::Eip4844(
+                BlobTransactionSidecar {
+                    blobs: vec![],
+                    commitments: vec![],
+                    proofs: vec![],
+                },
+            )),
             ..Default::default()
         })
         .expect_to_fail("EIP-4844 transactions are not supported")
@@ -97,6 +99,7 @@ async fn call_fail() -> anyhow::Result<()> {
         })
         .expect_to_fail("`maxPriorityFeePerGas` higher than `maxFeePerGas`")
         .await;
+
     tester
         .l2_provider
         .call(TransactionRequest {
@@ -114,7 +117,6 @@ async fn call_fail() -> anyhow::Result<()> {
         })
         .expect_to_fail("`maxPriorityFeePerGas` is too high")
         .await;
-
     // Missing field errors
     tester
         .l2_provider
@@ -128,10 +130,10 @@ async fn call_fail() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_deploy() -> anyhow::Result<()> {
+async fn call_deploy(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can run `eth_call` with contract deployment
-    let tester = Tester::setup().await?;
     let result = EventEmitter::deploy_builder(tester.l2_provider.clone())
         .call()
         .await?;
@@ -139,11 +141,10 @@ async fn call_deploy() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_revert() -> anyhow::Result<()> {
+async fn call_revert(tester: Tester) -> anyhow::Result<()> {
     // Test that the node returns error on reverting `eth_call`
-    let tester = Tester::setup().await?;
-
     let simple_revert = SimpleRevert::deploy(tester.l2_provider.clone()).await?;
     // Custom error is returned as accompanying data
     let error = simple_revert
@@ -171,11 +172,11 @@ async fn call_revert() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn call_with_state_overrides() -> anyhow::Result<()> {
+async fn call_with_state_overrides(tester: Tester) -> anyhow::Result<()> {
     // Deploy a dummy contract with storage at slot 0, call it to read the value,
     // then call again with a state override for slot 0 and expect a different result.
-    let tester = Tester::setup().await?;
 
     // Deploy TracingSecondary with `data = 1` stored at slot 0
     let initial_data = U256::from(1);

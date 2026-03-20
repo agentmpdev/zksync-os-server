@@ -4,15 +4,15 @@ use alloy::primitives::{Address, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::{AccessListItem, TransactionRequest};
 use tokio::time::Instant;
-use zksync_os_integration_tests::Tester;
 use zksync_os_integration_tests::assert_traits::{ReceiptAssert, ReceiptsAssert};
+use zksync_os_integration_tests::{CURRENT_TO_L1, NEXT_TO_GATEWAY, Tester, test_casing};
 
 mod upgrade;
 
+#[test_casing([CURRENT_TO_L1, NEXT_TO_GATEWAY])]
 #[test_log::test(tokio::test)]
-async fn basic_transfers() -> anyhow::Result<()> {
+async fn basic_transfers(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can process 100 concurrent transfers to random accounts
-    let tester = Tester::setup().await?;
     let alice = tester.l2_wallet.default_signer().address();
     let alice_balance_before = tester.l2_provider.get_balance(alice).await?;
 
@@ -45,11 +45,10 @@ async fn basic_transfers() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_casing([CURRENT_TO_L1])]
 #[test_log::test(tokio::test)]
-async fn eip2930() -> anyhow::Result<()> {
+async fn eip2930(tester: Tester) -> anyhow::Result<()> {
     // Test that the node can process EIP-2930 transactions
-    let tester = Tester::setup().await?;
-
     let tx = TransactionRequest::default()
         .from(tester.l2_wallet.default_signer().address())
         .to(Address::random())
