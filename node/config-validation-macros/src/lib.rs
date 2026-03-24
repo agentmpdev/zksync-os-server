@@ -1,3 +1,54 @@
+//! Declarative validation derive for the node's end configuration.
+//!
+//! `ConfigValidate` generates an implementation of
+//! `crate::config::ConditionalConfigValidator` for the annotated struct. When the
+//! struct is also marked with `#[config_validate(root)]`, the derive additionally
+//! generates an async `validate()` method that:
+//!
+//! - walks the config tree and collects synchronous validation errors
+//! - formats all collected errors into a single `anyhow::Error`
+//! - runs async field validators after the synchronous pass succeeds
+//!
+//! Supported `#[config_validate(...)]` forms on structs:
+//!
+//! - `root`
+//!   Marks the final top-level config struct and generates `validate()`.
+//!
+//! Supported `#[config_validate(...)]` forms on fields:
+//!
+//! - `required_if_main`
+//!   Requires an `Option<_>` field to be `Some` when
+//!   `root.general_config.node_role.is_main()`.
+//! - `required_if_external`
+//!   Requires an `Option<_>` field to be `Some` when
+//!   `root.general_config.node_role.is_external()`.
+//! - `validate(<predicate>, <message>)`
+//!   Adds a custom synchronous validator. The predicate receives `(&Config, &FieldType)`
+//!   and must return `bool`. The message is appended after the generated config path.
+//! - `async_validate(<validator>)`
+//!   Adds a custom async validator for a field on the root struct. The validator receives
+//!   `(&RootConfig, &FieldType)` and returns `anyhow::Result<()>`.
+//! - `nested`
+//!   Forces recursive validation for this field even if it does not match the default
+//!   recursion heuristics.
+//! - `skip_nested`
+//!   Disables recursive validation for this field even if it would recurse by default.
+//! - `path = "..."`
+//!   Overrides the config path segment used in error messages for this field.
+//!
+//! Default path segment:
+//!
+//! - if the field name ends with `_config`, that suffix is stripped
+//! - otherwise the full field name is used
+//!
+//! Default recursive validation:
+//!
+//! - fields whose name ends with `_config`
+//! - fields marked with `#[config(nest)]`
+//!
+//! This keeps common subconfig fields zero-configuration while still allowing explicit
+//! opt-out via `skip_nested`.
+//!
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
@@ -172,6 +223,25 @@ impl Parse for ParenValidationArgs {
     }
 }
 
+/// Derives declarative config validation.
+///
+/// Example:
+///
+/// ```rust,ignore
+/// #[derive(ConfigValidate)]
+/// #[config_validate(root)]
+/// pub struct Config {
+///     pub general_config: GeneralConfig,
+///     #[config_validate(required_if_main)]
+///     pub external_price_api_client_config: Option<ExternalPriceApiClientConfig>,
+/// }
+///
+/// #[derive(ConfigValidate)]
+/// pub struct GeneralConfig {
+///     #[config_validate(required_if_external)]
+///     pub main_node_rpc_url: Option<String>,
+/// }
+/// ```
 #[proc_macro_derive(ConfigValidate, attributes(config_validate))]
 pub fn derive_config_validate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
