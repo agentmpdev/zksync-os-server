@@ -150,11 +150,9 @@ pub async fn main() {
     let mut config = build_external_config(config_repo).await;
     tracing::info!(?config, "Loaded config");
     load_internal_config(&mut config);
+    config.validate().await.expect("invalid config");
     // ======= Run tasks ===========
     let ephemeral_enabled = config.general_config.ephemeral;
-    if !ephemeral_enabled && config.general_config.ephemeral_state.is_some() {
-        panic!("`ephemeral_state` requires `ephemeral` mode to be enabled");
-    }
     let _ephemeral_guard = ephemeral_enabled.then(|| enable_ephemeral_mode(&mut config));
     let prometheus_port = config.observability_config.prometheus.port;
 
@@ -215,7 +213,6 @@ async fn handle_delayed_termination(runtime: Runtime) {
         },
         _ = sigint.recv() => {
             tracing::info!("received SIGINT: shutting down gracefully (within 10s)");
-
             runtime.graceful_shutdown_with_timeout(GRACEFUL_SHUTDOWN_TIMEOUT);
         },
     }

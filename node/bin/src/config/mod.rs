@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
 use std::{path::PathBuf, time::Duration};
 use zksync_os_batch_verification;
+use zksync_os_config_validation_macros::ConfigValidate;
 use zksync_os_l1_sender::commands::commit::CommitCommand;
 use zksync_os_l1_sender::commands::execute::ExecuteCommand;
 use zksync_os_l1_sender::commands::prove::ProofCommand;
@@ -43,15 +44,20 @@ pub use build_external_config::{build_external_config, load_config_file_sources}
 ///    files are used. In Docker, the `local-chains/` directory is not copied into the image,
 ///    so no files are auto-loaded and config must be provided entirely via environment variables.
 /// 3. **Environment variables** — always override everything.
-#[derive(Debug)]
+#[derive(Debug, ConfigValidate)]
+#[config_validate(root)]
 pub struct Config {
+    #[config_validate(nested)]
     pub general_config: GeneralConfig,
+    #[config_validate(nested)]
     pub network_config: NetworkConfig,
+    #[config_validate(nested)]
     pub genesis_config: GenesisConfig,
     pub rpc_config: RpcConfig,
     pub mempool_config: MempoolConfig,
     pub tx_validator_config: MempoolTxValidatorConfig,
     pub sequencer_config: SequencerConfig,
+    #[config_validate(nested, async_validate(Self::validate_operator_signers))]
     pub l1_sender_config: L1SenderConfig,
     pub l1_watcher_config: L1WatcherConfig,
     pub batcher_config: BatcherConfig,
@@ -65,8 +71,31 @@ pub struct Config {
     pub interop_fee_updater_config: InteropFeeUpdaterConfig,
     /// Only required on the Main Node, where the base token price updater runs.
     /// External Nodes never start that component and may omit this config entirely.
+    #[config_validate(required_if_main)]
     pub external_price_api_client_config: Option<ExternalPriceApiClientConfig>,
     pub fee_config: FeeConfig,
+}
+
+pub(crate) trait ConditionalConfigValidator {
+    fn validate_conditional(&self, root: &Config, errors: &mut Vec<String>, prefix: &str);
+}
+
+pub(crate) fn join_validation_path(prefix: &str, segment: &str) -> String {
+    if prefix.is_empty() {
+        segment.to_owned()
+    } else {
+        format!("{prefix}.{segment}")
+    }
+}
+
+pub(crate) fn format_validation_errors(prefix: &str, errors: &[String]) -> String {
+    let formatted_errors = errors
+        .iter()
+        .enumerate()
+        .map(|(idx, error)| format!("{}. {error}", idx + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{prefix}:\n{formatted_errors}")
 }
 
 impl Config {
@@ -149,6 +178,48 @@ impl Config {
         let repo = ConfigRepository::new(&schema).with_all(sources);
         repo.single()?.parse().map_err(log_all_errors)
     }
+
+    async fn validate_operator_signers(
+        root: &Self,
+        l1_sender_config: &L1SenderConfig,
+    ) -> anyhow::Result<()> {
+        if !root.general_config.node_role.is_main() {
+            return Ok(());
+        }
+
+        let commit = match &l1_sender_config.operator_commit_sk {
+            Some(signer) => signer,
+            None => return Ok(()),
+        };
+        let prove = match &l1_sender_config.operator_prove_sk {
+            Some(signer) => signer,
+            None => return Ok(()),
+        };
+        let execute = match &l1_sender_config.operator_execute_sk {
+            Some(signer) => signer,
+            None => return Ok(()),
+        };
+
+        let commit_addr = commit.address().await.map_err(|err| {
+            anyhow::anyhow!("failed to resolve `l1_sender.operator_commit_sk`: {err}")
+        })?;
+        let prove_addr = prove.address().await.map_err(|err| {
+            anyhow::anyhow!("failed to resolve `l1_sender.operator_prove_sk`: {err}")
+        })?;
+        let execute_addr = execute.address().await.map_err(|err| {
+            anyhow::anyhow!("failed to resolve `l1_sender.operator_execute_sk`: {err}")
+        })?;
+
+        if commit_addr == prove_addr || prove_addr == execute_addr || execute_addr == commit_addr {
+            anyhow::bail!(
+                "invalid config:\n1. operator addresses for `l1_sender.operator_commit_sk`, \
+                 `l1_sender.operator_prove_sk`, and `l1_sender.operator_execute_sk` must be different; \
+                 got commit={commit_addr}, prove={prove_addr}, execute={execute_addr}"
+            );
+        }
+
+        Ok(())
+    }
 }
 
 fn log_all_errors(errors: ParseErrors) -> anyhow::Error {
@@ -186,7 +257,7 @@ fn log_all_errors(errors: ParseErrors) -> anyhow::Error {
 /// "Umbrella" config for the node.
 /// If variable is shared i.e. used by multiple components OR does not belong to any specific component
 /// then it belongs here.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct GeneralConfig {
     #[config(default_t = NodeRole::MainNode, with = Serde![str])]
@@ -240,6 +311,7 @@ pub struct GeneralConfig {
     /// **IMPORTANT: It must be set for an external node. However, setting this DOES NOT make the node into an external node.
     /// [`GeneralConfig::node_role`] is the source of truth for node type. **
     #[config(default_t = None)]
+    #[config_validate(required_if_external)]
     pub main_node_rpc_url: Option<String>,
 
     /// Whether to run the priority tree component.
@@ -247,6 +319,10 @@ pub struct GeneralConfig {
     /// Optional for External Nodes - if disabled on EN, the priority tree will need to be rebuilt
     /// from scratch before turning this EN into a Main Node.
     #[config(default_t = true)]
+    #[config_validate(validate(
+        |root: &Config, value: &bool| !root.general_config.node_role.is_main() || *value,
+        "must be true when `general.node_role=main`"
+    ))]
     pub run_priority_tree: bool,
 
     /// Enables ephemeral mode that isolates RocksDB into a temporary directory.
@@ -257,19 +333,31 @@ pub struct GeneralConfig {
 
     /// Path to ephemeral state to load at startup.
     #[config(default_t = None)]
+    #[config_validate(validate(
+        |root: &Config, value: &Option<PathBuf>| root.general_config.ephemeral || value.is_none(),
+        "requires `general.ephemeral=true`"
+    ))]
     pub ephemeral_state: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct NetworkConfig {
     /// Whether devp2p-based networking should be enabled.
     #[config(default_t = false)]
+    #[config_validate(validate(
+        |root: &Config, value: &bool| !root.general_config.node_role.is_external() || *value,
+        "must be true when `general.node_role=external`"
+    ))]
     pub enabled: bool,
     /// The node's secret key (256-bit ECDSA), from which the node's identity is derived. Used during
     /// initial RLPx handshake.
     #[config(secret)]
     #[config(default, with = SecretKeyDeserializer)]
+    #[config_validate(validate(
+        |root: &Config, value: &Option<SecretKey>| !root.network_config.enabled || value.is_some(),
+        "is required when `network.enabled=true`"
+    ))]
     pub secret_key: Option<SecretKey>,
     /// IPv4 address to use for Node Discovery Protocol v5 (discv5) and RLPx Transport Protocol (rlpx).
     #[config(default_t = Ipv4Addr::UNSPECIFIED, with = Serde![str])]
@@ -293,20 +381,24 @@ pub enum StateBackendConfig {
     Compacted,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 pub struct GenesisConfig {
     /// L1 address of `Bridgehub` contract. This address and chain ID is an entrypoint into L1 discoverability so most
     /// other contracts should be discoverable through it.
+    #[config_validate(required_if_main)]
     pub bridgehub_address: Option<Address>,
 
     /// L1 address of the `BytecodeSupplier` contract. This address right now cannot be discovered through `Bridgehub`,
     /// so it has to be provided explicitly.
+    #[config_validate(required_if_main)]
     pub bytecode_supplier_address: Option<Address>,
 
     /// Chain ID of the chain node operates on.
+    #[config_validate(required_if_main)]
     pub chain_id: Option<u64>,
 
     /// Path to the file with genesis input.
+    #[config_validate(required_if_main)]
     pub genesis_input_path: Option<PathBuf>,
 }
 
@@ -501,23 +593,26 @@ pub struct RpcConfig {
 ///
 /// Each operator accepts either a hex private key string (backward-compatible) or a GCP KMS
 /// resource object: `{"type": "gcp_kms", "resource": "projects/.../cryptoKeyVersions/N"}`.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 pub struct L1SenderConfig {
     /// Signer to commit batches to L1.
     /// Must be consistent with the operator key set on the contract (permissioned!)
     /// Not required for External Nodes, which do not send L1 transactions.
+    #[config_validate(required_if_main)]
     #[config(secret, alias = "operator_commit_pk", with = SignerConfigDeserializer)]
     pub operator_commit_sk: Option<SignerConfig>,
 
     /// Signer to submit proofs to L1.
     /// Can be arbitrary funded address - proof submission is permissionless.
     /// Not required for External Nodes, which do not send L1 transactions.
+    #[config_validate(required_if_main)]
     #[config(secret, alias = "operator_prove_pk", with = SignerConfigDeserializer)]
     pub operator_prove_sk: Option<SignerConfig>,
 
     /// Signer to execute batches on L1.
     /// Can be arbitrary funded address - execute submission is permissionless.
     /// Not required for External Nodes, which do not send L1 transactions.
+    #[config_validate(required_if_main)]
     #[config(secret, alias = "operator_execute_pk", with = SignerConfigDeserializer)]
     pub operator_execute_sk: Option<SignerConfig>,
 
@@ -557,6 +652,7 @@ pub struct L1SenderConfig {
 
     /// Pubdata mode is used by block-producing components on the Main Node.
     /// External Nodes only replay blocks, so they may leave this unset.
+    #[config_validate(required_if_main)]
     #[config(with = Serde![str])]
     pub pubdata_mode: Option<PubdataMode>,
 }
@@ -1252,5 +1348,139 @@ impl From<FeeConfig> for zksync_os_sequencer::execution::FeeConfig {
                 .native_price_override
                 .map(|n| BigUint::from(n.to::<u128>())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::signers::k256::ecdsa::SigningKey;
+
+    fn local_signer(byte: u8) -> SignerConfig {
+        SignerConfig::Local(SigningKey::from_slice(&[byte; 32]).unwrap())
+    }
+
+    fn base_config(node_role: NodeRole) -> Config {
+        Config {
+            general_config: GeneralConfig {
+                node_role,
+                run_priority_tree: true,
+                ..Default::default()
+            },
+            network_config: NetworkConfig::default(),
+            genesis_config: GenesisConfig {
+                bridgehub_address: Some(Address::ZERO),
+                bytecode_supplier_address: Some(Address::with_last_byte(0x01)),
+                chain_id: Some(270),
+                genesis_input_path: Some("genesis.json".into()),
+            },
+            rpc_config: RpcConfig::default(),
+            mempool_config: MempoolConfig::default(),
+            tx_validator_config: MempoolTxValidatorConfig::default(),
+            sequencer_config: SequencerConfig::default(),
+            l1_sender_config: L1SenderConfig {
+                operator_commit_sk: Some(local_signer(0x11)),
+                operator_prove_sk: Some(local_signer(0x22)),
+                operator_execute_sk: Some(local_signer(0x33)),
+                max_fee_per_gas: 200 * EtherUnit::Gwei,
+                max_priority_fee_per_gas: 1 * EtherUnit::Gwei,
+                max_fee_per_blob_gas: 2 * EtherUnit::Gwei,
+                command_limit: 16,
+                poll_interval: Duration::from_millis(100),
+                fusaka_upgrade_timestamp: u64::MAX,
+                enabled: true,
+                pubdata_mode: Some(PubdataMode::Blobs),
+            },
+            l1_watcher_config: L1WatcherConfig::default(),
+            batcher_config: BatcherConfig::default(),
+            prover_input_generator_config: ProverInputGeneratorConfig::default(),
+            prover_api_config: ProverApiConfig::default(),
+            status_server_config: StatusServerConfig::default(),
+            observability_config: ObservabilityConfig::default(),
+            gas_adjuster_config: GasAdjusterConfig::default(),
+            batch_verification_config: BatchVerificationConfig::default(),
+            base_token_price_updater_config: BaseTokenPriceUpdaterConfig::default(),
+            interop_fee_updater_config: InteropFeeUpdaterConfig::default(),
+            external_price_api_client_config: Some(ExternalPriceApiClientConfig::Forced {
+                forced: ForcedPriceClientConfig::default(),
+            }),
+            fee_config: FeeConfig::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn main_node_validation_reports_all_main_only_required_fields() {
+        let mut config = base_config(NodeRole::MainNode);
+        config.genesis_config.bridgehub_address = None;
+        config.genesis_config.bytecode_supplier_address = None;
+        config.genesis_config.chain_id = None;
+        config.genesis_config.genesis_input_path = None;
+        config.l1_sender_config.operator_commit_sk = None;
+        config.l1_sender_config.operator_prove_sk = None;
+        config.l1_sender_config.operator_execute_sk = None;
+        config.l1_sender_config.pubdata_mode = None;
+        config.external_price_api_client_config = None;
+
+        let err = config.validate().await.unwrap_err().to_string();
+
+        assert!(
+            err.contains("`genesis.bridgehub_address` is required when `general.node_role=main`")
+        );
+        assert!(err.contains(
+            "`genesis.bytecode_supplier_address` is required when `general.node_role=main`"
+        ));
+        assert!(err.contains("`genesis.chain_id` is required when `general.node_role=main`"));
+        assert!(
+            err.contains("`genesis.genesis_input_path` is required when `general.node_role=main`")
+        );
+        assert!(
+            err.contains(
+                "`l1_sender.operator_commit_sk` is required when `general.node_role=main`"
+            )
+        );
+        assert!(
+            err.contains("`l1_sender.operator_prove_sk` is required when `general.node_role=main`")
+        );
+        assert!(
+            err.contains(
+                "`l1_sender.operator_execute_sk` is required when `general.node_role=main`"
+            )
+        );
+        assert!(err.contains("`l1_sender.pubdata_mode` is required when `general.node_role=main`"));
+        assert!(
+            err.contains("`external_price_api_client` is required when `general.node_role=main`")
+        );
+    }
+
+    #[tokio::test]
+    async fn external_node_can_omit_main_only_fields() {
+        let mut config = base_config(NodeRole::ExternalNode);
+        config.general_config.main_node_rpc_url = Some("http://127.0.0.1:3050".into());
+        config.network_config.enabled = true;
+        config.network_config.secret_key = Some(SecretKey::from_slice(&[0x44; 32]).unwrap());
+        config.genesis_config.bridgehub_address = None;
+        config.genesis_config.bytecode_supplier_address = None;
+        config.genesis_config.chain_id = None;
+        config.genesis_config.genesis_input_path = None;
+        config.l1_sender_config.operator_commit_sk = None;
+        config.l1_sender_config.operator_prove_sk = None;
+        config.l1_sender_config.operator_execute_sk = None;
+        config.l1_sender_config.pubdata_mode = None;
+        config.external_price_api_client_config = None;
+
+        config.validate().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn main_node_validation_rejects_duplicate_operator_addresses() {
+        let mut config = base_config(NodeRole::MainNode);
+        let signer = local_signer(0x55);
+        config.l1_sender_config.operator_commit_sk = Some(signer.clone());
+        config.l1_sender_config.operator_prove_sk = Some(signer.clone());
+        config.l1_sender_config.operator_execute_sk = Some(local_signer(0x66));
+
+        let err = config.validate().await.unwrap_err().to_string();
+
+        assert!(err.contains("must be different"));
     }
 }
