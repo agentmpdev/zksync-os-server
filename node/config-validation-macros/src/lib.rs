@@ -23,6 +23,7 @@ enum ValidatorKind {
 #[derive(Default)]
 struct FieldAttrs {
     path: Option<LitStr>,
+    skip_nested: bool,
     nested: bool,
     validators: Vec<ValidatorKind>,
     async_validators: Vec<Expr>,
@@ -70,6 +71,9 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
             if meta.path.is_ident("path") {
                 parsed.path = Some(meta.value()?.parse()?);
                 Ok(())
+            } else if meta.path.is_ident("skip_nested") {
+                parsed.skip_nested = true;
+                Ok(())
             } else if meta.path.is_ident("nested") {
                 parsed.nested = true;
                 Ok(())
@@ -96,6 +100,12 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                 Err(meta.error("unsupported `config_validate` field attribute"))
             }
         })?;
+    }
+    if parsed.nested && parsed.skip_nested {
+        return Err(syn::Error::new(
+            field.span(),
+            "`nested` and `skip_nested` cannot be used together",
+        ));
     }
     Ok(parsed)
 }
@@ -194,6 +204,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
     for field in &fields.named {
         let field_ident = field.ident.as_ref().unwrap();
         let field_attrs = parse_field_attrs(field)?;
+        let should_recurse = should_recurse(field, field_ident, &field_attrs);
         let default_path = default_path_segment(field_ident);
         let path_segment = field_attrs.path.unwrap_or(default_path);
 
@@ -220,7 +231,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
             });
         }
 
-        if field_attrs.nested {
+        if should_recurse {
             nested_validations.push(nested_validation(field, field_ident, &path_segment));
         }
 
@@ -288,6 +299,35 @@ fn default_path_segment(field_ident: &Ident) -> LitStr {
         .unwrap_or(&field_name)
         .to_owned();
     LitStr::new(&path, field_ident.span())
+}
+
+fn should_recurse(field: &Field, field_ident: &Ident, field_attrs: &FieldAttrs) -> bool {
+    if field_attrs.skip_nested {
+        return false;
+    }
+    if field_attrs.nested || field_ident.to_string().ends_with("_config") {
+        return true;
+    }
+    has_smart_config_nest(field)
+}
+
+fn has_smart_config_nest(field: &Field) -> bool {
+    for attr in &field.attrs {
+        if !attr.path().is_ident("config") {
+            continue;
+        }
+        let mut has_nest = false;
+        let parse_result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("nest") {
+                has_nest = true;
+            }
+            Ok(())
+        });
+        if parse_result.is_ok() && has_nest {
+            return true;
+        }
+    }
+    false
 }
 
 fn nested_validation(

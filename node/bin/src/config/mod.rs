@@ -47,17 +47,14 @@ pub use build_external_config::{build_external_config, load_config_file_sources}
 #[derive(Debug, ConfigValidate)]
 #[config_validate(root)]
 pub struct Config {
-    #[config_validate(nested)]
     pub general_config: GeneralConfig,
-    #[config_validate(nested)]
     pub network_config: NetworkConfig,
-    #[config_validate(nested)]
     pub genesis_config: GenesisConfig,
     pub rpc_config: RpcConfig,
     pub mempool_config: MempoolConfig,
     pub tx_validator_config: MempoolTxValidatorConfig,
     pub sequencer_config: SequencerConfig,
-    #[config_validate(nested, async_validate(Self::validate_operator_signers))]
+    #[config_validate(async_validate(Self::validate_operator_signers))]
     pub l1_sender_config: L1SenderConfig,
     pub l1_watcher_config: L1WatcherConfig,
     pub batcher_config: BatcherConfig,
@@ -71,7 +68,7 @@ pub struct Config {
     pub interop_fee_updater_config: InteropFeeUpdaterConfig,
     /// Only required on the Main Node, where the base token price updater runs.
     /// External Nodes never start that component and may omit this config entirely.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if_main, skip_nested)]
     pub external_price_api_client_config: Option<ExternalPriceApiClientConfig>,
     pub fee_config: FeeConfig,
 }
@@ -402,7 +399,7 @@ pub struct GenesisConfig {
     pub genesis_input_path: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct StatusServerConfig {
     /// Whether to enable status server.
@@ -414,7 +411,7 @@ pub struct StatusServerConfig {
     pub address: String,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 pub struct RebuildBlocksConfig {
     /// Number of the block to start rebuilding from.
     /// All blocks starting from this number will be replayed - but unlike normal replay,
@@ -427,7 +424,7 @@ pub struct RebuildBlocksConfig {
     pub blocks_to_empty: Vec<u64>,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct SequencerConfig {
     /// Defines the block time for the sequencer.
@@ -507,7 +504,7 @@ pub struct SequencerConfig {
 }
 
 /// Configuration for all transaction validators applied during block production.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct TxValidatorConfig {
     /// Deployment filter configuration.
@@ -517,7 +514,7 @@ pub struct TxValidatorConfig {
 
 /// Configuration for the deployment filter.
 /// When enabled, only transactions from allowed deployers can deploy contracts.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct DeploymentFilterConfig {
     /// Whether the deployment filter is enabled.
@@ -529,7 +526,7 @@ pub struct DeploymentFilterConfig {
     pub allowed_deployers: Vec<Address>,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct RpcConfig {
     /// JSON-RPC address to listen on.
@@ -657,7 +654,7 @@ pub struct L1SenderConfig {
     pub pubdata_mode: Option<PubdataMode>,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct L1WatcherConfig {
     /// Max number of L1 blocks to be processed at a time.
@@ -676,7 +673,7 @@ pub struct L1WatcherConfig {
     pub poll_interval: Duration,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct MempoolConfig {
     #[config(default_t = usize::MAX)]
@@ -689,7 +686,7 @@ pub struct MempoolConfig {
     pub minimal_protocol_basefee: u64,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct MempoolTxValidatorConfig {
     /// Max input size of a transaction to be accepted by mempool
@@ -698,7 +695,7 @@ pub struct MempoolTxValidatorConfig {
 }
 
 /// Only used on the Main Node.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct BatcherConfig {
     /// How long to keep a batch open before sealing it.
@@ -723,7 +720,7 @@ pub struct BatcherConfig {
 }
 
 /// Only used on the Main Node.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct ProverInputGeneratorConfig {
     /// Whether to enable debug output in RiscV binary.
@@ -738,7 +735,7 @@ pub struct ProverInputGeneratorConfig {
 }
 
 /// Only used on the Main Node.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct ProverApiConfig {
     /// Whether to enable prover server.
@@ -788,7 +785,7 @@ pub struct ProverApiConfig {
     pub proof_storage: ProofStorageConfig,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct FakeFriProversConfig {
     /// Whether to enable the fake provers pool.
@@ -817,7 +814,7 @@ pub struct FakeFriProversConfig {
     pub timeout_frequency: f64,
 }
 
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct FakeSnarkProversConfig {
     /// Whether to enable the fake provers pool.
@@ -829,7 +826,7 @@ pub struct FakeSnarkProversConfig {
     pub max_batch_age: Duration,
 }
 
-#[derive(Debug, Clone, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct ProofStorageConfig {
     #[config(default_t = "./db/fri_proofs/".into())]
@@ -846,7 +843,7 @@ pub struct ProofStorageConfig {
 
 /// Set of options related to the observability stack,
 /// e.g. logging, metrics, tracing, error tracking, etc.
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct ObservabilityConfig {
     /// Configuration for Prometheus metrics.
@@ -866,7 +863,7 @@ pub struct ObservabilityConfig {
     pub otlp: OtlpConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct PrometheusConfig {
     /// Port to expose Prometheus metrics on.
@@ -874,7 +871,7 @@ pub struct PrometheusConfig {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct SentryConfig {
     /// Sentry DSN URL.
@@ -887,7 +884,7 @@ pub struct SentryConfig {
 }
 
 /// Configuration for the logging stack.
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct LogConfig {
     /// Format of the logs emitted by the node.
@@ -901,7 +898,7 @@ pub struct LogConfig {
 }
 
 /// Configuration for gas adjuster.
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct GasAdjusterConfig {
     #[config(default_t = 100)]
@@ -917,7 +914,7 @@ pub struct GasAdjusterConfig {
 }
 
 /// Configuration for the opentelemetry stack.
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct OtlpConfig {
     /// Level of spans to be exported to OpenTelemetry.
@@ -936,7 +933,7 @@ pub struct OtlpConfig {
 }
 
 /// Configuration for batch verification client and server
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct BatchVerificationConfig {
     /// [server] If we are collecting batch verification signatures
@@ -973,7 +970,7 @@ pub struct BatchVerificationConfig {
 }
 
 /// Config for the base token price updater.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct BaseTokenPriceUpdaterConfig {
     /// How often to fetch external prices.
@@ -1004,7 +1001,7 @@ pub struct BaseTokenPriceUpdaterConfig {
 }
 
 /// Config for the interop fee updater.
-#[derive(Clone, Debug, DescribeConfig, DeserializeConfig)]
+#[derive(Clone, Debug, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct InteropFeeUpdaterConfig {
     /// How often to check whether interop fee should be updated.
@@ -1018,7 +1015,7 @@ pub struct InteropFeeUpdaterConfig {
 /// Config to force configured token prices in USD.
 /// E.g. if needed to force 1 TOKEN = 0.3 USD, that would be represented in a config with price=0.3 for this token.
 /// Important: price is **token** price (e.g. for USDC it would be 1), not base token unit price.
-#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, PartialEq, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct ForcedPriceClientConfig {
     /// Map of token addresses to their forced price in USD for 1 token (not base token unit!).
@@ -1065,7 +1062,7 @@ pub enum ExternalPriceApiClientConfig {
 }
 
 /// Fee-related configuration.
-#[derive(Debug, Clone, DescribeConfig, DeserializeConfig)]
+#[derive(Debug, Clone, DescribeConfig, DeserializeConfig, ConfigValidate)]
 #[config(derive(Default))]
 pub struct FeeConfig {
     /// Price for one unit of native resource in USD.
