@@ -22,7 +22,7 @@
 //! - `required_if_external`
 //!   Requires an `Option<_>` field to be `Some` when
 //!   `root.general_config.node_role.is_external()`.
-//! - `validate(<predicate>, <message>)`
+//! - `custom(<predicate>, <message>)`
 //!   Adds a custom synchronous validator. The predicate receives `(&Config, &FieldType)`
 //!   and must return `bool`. The message is appended after the generated config path.
 //! - `async_validate(<validator>)`
@@ -136,7 +136,7 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                 ensure_option_field(field, "required_if_external")?;
                 parsed.validators.push(ValidatorKind::RequiredIfExternal);
                 Ok(())
-            } else if meta.path.is_ident("validate") {
+            } else if meta.path.is_ident("custom") {
                 let args = meta.input.parse::<ParenValidationArgs>()?;
                 parsed.validators.push(ValidatorKind::Custom {
                     predicate: Box::new(args.predicate),

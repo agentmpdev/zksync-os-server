@@ -340,7 +340,7 @@ pub struct GeneralConfig {
     /// Optional for External Nodes - if disabled on EN, the priority tree will need to be rebuilt
     /// from scratch before turning this EN into a Main Node.
     #[config(default_t = true)]
-    #[config_validate(validate(
+    #[config_validate(custom(
         |root: &Config, value: &bool| !root.general_config.node_role.is_main() || *value,
         "must be true when `general.node_role=main`"
     ))]
@@ -354,7 +354,7 @@ pub struct GeneralConfig {
 
     /// Path to ephemeral state to load at startup.
     #[config(default_t = None)]
-    #[config_validate(validate(
+    #[config_validate(custom(
         |root: &Config, value: &Option<PathBuf>| root.general_config.ephemeral || value.is_none(),
         "requires `general.ephemeral=true`"
     ))]
@@ -366,7 +366,7 @@ pub struct GeneralConfig {
 pub struct NetworkConfig {
     /// Whether devp2p-based networking should be enabled.
     #[config(default_t = false)]
-    #[config_validate(validate(
+    #[config_validate(custom(
         |root: &Config, value: &bool| !root.general_config.node_role.is_external() || *value,
         "must be true when `general.node_role=external`"
     ))]
@@ -375,7 +375,7 @@ pub struct NetworkConfig {
     /// initial RLPx handshake.
     #[config(secret)]
     #[config(default, with = SecretKeyDeserializer)]
-    #[config_validate(validate(
+    #[config_validate(custom(
         |root: &Config, value: &Option<SecretKey>| !root.network_config.enabled || value.is_some(),
         "is required when `network.enabled=true`"
     ))]
