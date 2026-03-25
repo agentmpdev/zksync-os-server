@@ -43,6 +43,11 @@ struct Cli {
 
     #[command(subcommand)]
     cmd: Option<CliCommand>,
+
+    /// Makes the node to stop before calling `run` method.
+    /// It is used to catch issues with configuration.
+    #[arg(long)]
+    no_run: bool,
 }
 
 fn load_config_defaults(config_sources: &mut ConfigSources, config_paths: Option<Vec<String>>) {
@@ -151,6 +156,12 @@ pub async fn main() {
     tracing::info!(?config, "Loaded config");
     load_internal_config(&mut config);
     config.validate().await.expect("invalid config");
+
+    if opt.no_run {
+        tracing::info!("Node config was loaded successfully, exiting due to --no-run flag");
+        return;
+    }
+
     // ======= Run tasks ===========
     let ephemeral_enabled = config.general_config.ephemeral;
     let _ephemeral_guard = ephemeral_enabled.then(|| enable_ephemeral_mode(&mut config));
