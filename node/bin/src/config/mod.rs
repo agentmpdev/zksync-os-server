@@ -179,6 +179,7 @@ impl Config {
     async fn validate_operator_signers(
         root: &Self,
         l1_sender_config: &L1SenderConfig,
+        errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         if !root.general_config.node_role.is_main() {
             return Ok(());
@@ -197,22 +198,45 @@ impl Config {
             None => return Ok(()),
         };
 
-        let commit_addr = commit.address().await.map_err(|err| {
-            anyhow::anyhow!("failed to resolve `l1_sender.operator_commit_sk`: {err}")
-        })?;
-        let prove_addr = prove.address().await.map_err(|err| {
-            anyhow::anyhow!("failed to resolve `l1_sender.operator_prove_sk`: {err}")
-        })?;
-        let execute_addr = execute.address().await.map_err(|err| {
-            anyhow::anyhow!("failed to resolve `l1_sender.operator_execute_sk`: {err}")
-        })?;
+        let commit_addr = match commit.address().await {
+            Ok(address) => Some(address),
+            Err(err) => {
+                errors.push(format!(
+                    "failed to resolve `l1_sender.operator_commit_sk`: {err}"
+                ));
+                None
+            }
+        };
+        let prove_addr = match prove.address().await {
+            Ok(address) => Some(address),
+            Err(err) => {
+                errors.push(format!(
+                    "failed to resolve `l1_sender.operator_prove_sk`: {err}"
+                ));
+                None
+            }
+        };
+        let execute_addr = match execute.address().await {
+            Ok(address) => Some(address),
+            Err(err) => {
+                errors.push(format!(
+                    "failed to resolve `l1_sender.operator_execute_sk`: {err}"
+                ));
+                None
+            }
+        };
 
-        if commit_addr == prove_addr || prove_addr == execute_addr || execute_addr == commit_addr {
-            anyhow::bail!(
-                "invalid config:\n1. operator addresses for `l1_sender.operator_commit_sk`, \
+        if let (Some(commit_addr), Some(prove_addr), Some(execute_addr)) =
+            (commit_addr, prove_addr, execute_addr)
+            && (commit_addr == prove_addr
+                || prove_addr == execute_addr
+                || execute_addr == commit_addr)
+        {
+            errors.push(format!(
+                "operator addresses for `l1_sender.operator_commit_sk`, \
                  `l1_sender.operator_prove_sk`, and `l1_sender.operator_execute_sk` must be different; \
                  got commit={commit_addr}, prove={prove_addr}, execute={execute_addr}"
-            );
+            ));
         }
 
         Ok(())
@@ -1478,6 +1502,23 @@ mod tests {
 
         let err = config.validate().await.unwrap_err().to_string();
 
+        assert!(err.contains("must be different"));
+    }
+
+    #[tokio::test]
+    async fn main_node_validation_aggregates_sync_and_async_errors() {
+        let mut config = base_config(NodeRole::MainNode);
+        config.genesis_config.bridgehub_address = None;
+        let signer = local_signer(0x77);
+        config.l1_sender_config.operator_commit_sk = Some(signer.clone());
+        config.l1_sender_config.operator_prove_sk = Some(signer);
+
+        let err = config.validate().await.unwrap_err().to_string();
+
+        assert!(
+            err.contains("`genesis.bridgehub_address` is required when `general.node_role=main`")
+        );
+        assert!(err.contains("`l1_sender.operator_commit_sk`"));
         assert!(err.contains("must be different"));
     }
 }

@@ -6,8 +6,8 @@
 //! generates an async `validate()` method that:
 //!
 //! - walks the config tree and collects synchronous validation errors
+//! - runs async field validators and lets them append more validation errors
 //! - formats all collected errors into a single `anyhow::Error`
-//! - runs async field validators after the synchronous pass succeeds
 //!
 //! Supported `#[config_validate(...)]` forms on structs:
 //!
@@ -27,7 +27,7 @@
 //!   and must return `bool`. The message is appended after the generated config path.
 //! - `async_validate(<validator>)`
 //!   Adds a custom async validator for a field on the root struct. The validator receives
-//!   `(&RootConfig, &FieldType)` and returns `anyhow::Result<()>`.
+//!   `(&RootConfig, &FieldType, &mut Vec<String>)` and returns `anyhow::Result<()>`.
 //! - `nested`
 //!   Forces recursive validation for this field even if it does not match the default
 //!   recursion heuristics.
@@ -307,7 +307,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
         for validator in field_attrs.async_validators {
             async_field_validations.push(quote! {
-                (#validator)(self, &self.#field_ident).await?;
+                (#validator)(self, &self.#field_ident, &mut errors).await?;
             });
         }
     }
@@ -344,10 +344,10 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
                         &mut errors,
                         "",
                     );
+                    #(#async_field_validations)*
                     if !errors.is_empty() {
                         ::anyhow::bail!(crate::config::format_validation_errors("invalid config", &errors));
                     }
-                    #(#async_field_validations)*
                     Ok(())
                 }
             }
