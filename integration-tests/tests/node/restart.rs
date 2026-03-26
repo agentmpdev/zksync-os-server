@@ -5,12 +5,15 @@ use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use alloy::sol;
 use alloy::signers::local::PrivateKeySigner;
+use serde::Deserialize;
+use std::fs;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use zksync_os_contract_interface::Bridgehub;
 use zksync_os_contract_interface::l1_discovery::L1State;
 use zksync_os_integration_tests::assert_traits::{DEFAULT_TIMEOUT, POLL_INTERVAL, ReceiptAssert};
-use zksync_os_integration_tests::config::load_chain_config;
+use zksync_os_integration_tests::config::{ChainLayout, load_chain_config};
 use zksync_os_integration_tests::dyn_wallet_provider::EthWalletProvider;
 use zksync_os_integration_tests::provider::{ZksyncApi, ZksyncTestingProvider};
 use zksync_os_integration_tests::{CURRENT_TO_L1, StoppedTester, Tester, test_multisetup};
@@ -19,17 +22,35 @@ use zksync_os_server::config::Config;
 sol! {
     #[sol(rpc)]
     contract ValidatorTimelock {
-        function COMMITTER_ROLE() external view returns (bytes32);
         function REVERTER_ROLE() external view returns (bytes32);
         function hasRoleForChainId(uint256 _chainId, bytes32 _role, address _address) external view returns (bool);
         function revertBatchesSharedBridge(address _chainAddress, uint256 _newLastBatch) external;
     }
 }
 
-const V30_COMMIT_OPERATOR_KEY: &str =
-    "0xafc49c5bb410acc43973d0b6cf638220d3cedc3109a08aefa82cffb4853d4eb4";
-const V30_OPERATOR_KEY: &str =
-    "0x15ee7572483c7556b97a514b4425b6fb4a4b3ce0d9495383666af0bfe8707ccc";
+#[derive(Debug, Deserialize)]
+struct WalletEntry {
+    private_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChainWallets {
+    operator: WalletEntry,
+}
+
+fn chain_wallets_path(layout: ChainLayout<'_>, chain_id: u64) -> PathBuf {
+    PathBuf::from(std::env::var("WORKSPACE_DIR").expect("WORKSPACE_DIR environment variable is not set"))
+        .join("local-chains")
+        .join(layout.protocol_version())
+        .join("multi_chain")
+        .join(format!("wallets_{chain_id}.yaml"))
+}
+
+fn load_operator_private_key(layout: ChainLayout<'_>, chain_id: u64) -> anyhow::Result<String> {
+    let path = chain_wallets_path(layout, chain_id);
+    let wallets: ChainWallets = serde_yaml::from_str(&fs::read_to_string(&path)?)?;
+    Ok(wallets.operator.private_key)
+}
 
 fn make_commit_only_config(config: &mut Config) {
     config.prover_api_config.fake_fri_provers.enabled = true;
@@ -111,6 +132,7 @@ async fn wait_for_block_number_by_id(
 }
 
 async fn revert_batches_on_l1(stopped: &StoppedTester, new_last_batch: u64) -> anyhow::Result<()> {
+    let chain_layout = stopped.chain_layout();
     let chain_config = load_chain_config(stopped.chain_layout()).await;
     let chain_id = chain_config
         .genesis_config
@@ -124,46 +146,25 @@ async fn revert_batches_on_l1(stopped: &StoppedTester, new_last_batch: u64) -> a
     let validator_timelock_address = bridgehub.validator_timelock_address().await?;
     let chain_address = *bridgehub.zk_chain().await?.address();
 
-    let commit_operator = PrivateKeySigner::from_str(V30_COMMIT_OPERATOR_KEY)?;
-    let operator = PrivateKeySigner::from_str(V30_OPERATOR_KEY)?;
-    let commit_operator_address = commit_operator.address();
+    let operator = PrivateKeySigner::from_str(&load_operator_private_key(chain_layout, chain_id)?)?;
     let operator_address = operator.address();
     let mut l1_provider = stopped.l1_provider().clone();
-    l1_provider.wallet_mut().register_signer(commit_operator);
     l1_provider.wallet_mut().register_signer(operator);
 
     let validator_timelock = ValidatorTimelock::new(validator_timelock_address, l1_provider);
-    let committer_role = validator_timelock.COMMITTER_ROLE().call().await?;
     let reverter_role = validator_timelock.REVERTER_ROLE().call().await?;
 
     assert!(
         validator_timelock
-            .hasRoleForChainId(U256::from(chain_id), committer_role, commit_operator_address)
+            .hasRoleForChainId(U256::from(chain_id), reverter_role, operator_address)
             .call()
             .await?,
-        "configured V30 commit operator does not have the committer role on validator timelock"
-    );
-
-    let revert_sender = if validator_timelock
-        .hasRoleForChainId(U256::from(chain_id), reverter_role, commit_operator_address)
-        .call()
-        .await?
-    {
-        commit_operator_address
-    } else {
-        operator_address
-    };
-    assert!(
-        validator_timelock
-            .hasRoleForChainId(U256::from(chain_id), reverter_role, revert_sender)
-            .call()
-            .await?,
-        "no configured V30 operator has the reverter role on validator timelock"
+        "configured operator does not have the reverter role on validator timelock"
     );
 
     let revert_tx = validator_timelock
         .revertBatchesSharedBridge(chain_address, U256::from(new_last_batch))
-        .from(revert_sender)
+        .from(operator_address)
         .send()
         .await?;
     revert_tx
