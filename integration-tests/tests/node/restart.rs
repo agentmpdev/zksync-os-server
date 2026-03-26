@@ -3,8 +3,8 @@ use alloy::network::TransactionBuilder;
 use alloy::primitives::{Address, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
-use alloy::sol;
 use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
@@ -39,11 +39,13 @@ struct ChainWallets {
 }
 
 fn chain_wallets_path(layout: ChainLayout<'_>, chain_id: u64) -> PathBuf {
-    PathBuf::from(std::env::var("WORKSPACE_DIR").expect("WORKSPACE_DIR environment variable is not set"))
-        .join("local-chains")
-        .join(layout.protocol_version())
-        .join("multi_chain")
-        .join(format!("wallets_{chain_id}.yaml"))
+    PathBuf::from(
+        std::env::var("WORKSPACE_DIR").expect("WORKSPACE_DIR environment variable is not set"),
+    )
+    .join("local-chains")
+    .join(layout.protocol_version())
+    .join("multi_chain")
+    .join(format!("wallets_{chain_id}.yaml"))
 }
 
 fn load_operator_private_key(layout: ChainLayout<'_>, chain_id: u64) -> anyhow::Result<String> {
@@ -167,9 +169,7 @@ async fn revert_batches_on_l1(stopped: &StoppedTester, new_last_batch: u64) -> a
         .from(operator_address)
         .send()
         .await?;
-    revert_tx
-        .expect_successful_receipt()
-        .await?;
+    revert_tx.expect_successful_receipt().await?;
     Ok(())
 }
 
@@ -226,10 +226,11 @@ async fn node_recovers_from_l1_batch_revert_after_restart_v30() -> anyhow::Resul
         .expect_successful_receipt()
         .await?;
 
-    let committed_state = wait_for_l1_state(&tester, "a committed but not executed batch", |state| {
-        state.last_committed_batch >= 1 && state.last_executed_batch == 0
-    })
-    .await?;
+    let committed_state =
+        wait_for_l1_state(&tester, "a committed but not executed batch", |state| {
+            state.last_committed_batch >= 1 && state.last_executed_batch == 0
+        })
+        .await?;
     assert_eq!(
         committed_state.last_proved_batch, 0,
         "fake SNARK provers are disabled, so no batch should be proved"
@@ -248,17 +249,14 @@ async fn node_recovers_from_l1_batch_revert_after_restart_v30() -> anyhow::Resul
     revert_batches_on_l1(&stopped, committed_state.last_executed_batch).await?;
 
     let restarted = stopped.start_with_overrides(disable_commits_config).await?;
-    let safe_after_revert = block_number_by_id(&restarted, BlockId::Number(BlockNumberOrTag::Safe))
-        .await?;
+    let safe_after_revert =
+        block_number_by_id(&restarted, BlockId::Number(BlockNumberOrTag::Safe)).await?;
     assert_eq!(
         safe_after_revert, 0,
         "startup after L1 revert must recover the last committed block from L1"
     );
-    let finalized_after_revert = block_number_by_id(
-        &restarted,
-        BlockId::Number(BlockNumberOrTag::Finalized),
-    )
-    .await?;
+    let finalized_after_revert =
+        block_number_by_id(&restarted, BlockId::Number(BlockNumberOrTag::Finalized)).await?;
     assert_eq!(
         finalized_after_revert, 0,
         "startup after L1 revert must keep the executed frontier unchanged"
@@ -273,7 +271,9 @@ async fn node_recovers_from_l1_batch_revert_after_restart_v30() -> anyhow::Resul
         );
     }
 
-    let restarted = restarted.restart_with_overrides(make_full_pipeline_config).await?;
+    let restarted = restarted
+        .restart_with_overrides(make_full_pipeline_config)
+        .await?;
 
     let executed_receipt = restarted
         .l2_provider
@@ -289,7 +289,10 @@ async fn node_recovers_from_l1_batch_revert_after_restart_v30() -> anyhow::Resul
         .l2_zk_provider
         .wait_batch_number_by_block_number(executed_receipt.block_number.unwrap())
         .await?;
-    assert!(executed_batch >= 1, "post-revert transactions must be assigned to a finalized batch");
+    assert!(
+        executed_batch >= 1,
+        "post-revert transactions must be assigned to a finalized batch"
+    );
 
     let executed_state = wait_for_l1_state(
         &restarted,
