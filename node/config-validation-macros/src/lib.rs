@@ -389,27 +389,24 @@ fn nested_validation(
     field_ident: &Ident,
     path_segment: &LitStr,
 ) -> proc_macro2::TokenStream {
-    if option_inner_type(&field.ty).is_some() {
+    if let Some(inner_ty) = option_inner_type(&field.ty) {
         quote! {
             if let Some(value) = &self.#field_ident {
+                use crate::config::MaybeConditionalConfigValidator as _;
+
                 let child_prefix = crate::config::join_validation_path(prefix, #path_segment);
-                crate::config::ConditionalConfigValidator::validate_conditional(
-                    value,
-                    root,
-                    errors,
-                    &child_prefix,
-                );
+                let receiver = &::std::marker::PhantomData::<#inner_ty>;
+                receiver.maybe_validate_conditional(value, root, errors, &child_prefix);
             }
         }
     } else {
+        let field_ty = &field.ty;
         quote! {
+            use crate::config::MaybeConditionalConfigValidator as _;
+
             let child_prefix = crate::config::join_validation_path(prefix, #path_segment);
-            crate::config::ConditionalConfigValidator::validate_conditional(
-                &self.#field_ident,
-                root,
-                errors,
-                &child_prefix,
-            );
+            let receiver = &::std::marker::PhantomData::<#field_ty>;
+            receiver.maybe_validate_conditional(&self.#field_ident, root, errors, &child_prefix);
         }
     }
 }
