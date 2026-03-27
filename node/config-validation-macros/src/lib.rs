@@ -17,12 +17,9 @@
 //!
 //! Supported `#[config_validate(...)]` forms on fields:
 //!
-//! - `required_if_main`
+//! - `required_if = <role>`
 //!   Requires an `Option<_>` field to be `Some` when
-//!   `root.general_config.node_role.is_main()`.
-//! - `required_if_external`
-//!   Requires an `Option<_>` field to be `Some` when
-//!   `root.general_config.node_role.is_external()`.
+//!   `root.general_config.node_role == <role>`.
 //! - `custom(<predicate>, <message>)`
 //!   Adds a custom synchronous validator. The predicate receives `(&Config, &FieldType)`
 //!   and must return `bool`. The message is appended after the generated config path.
@@ -64,8 +61,7 @@ struct StructAttrs {
 }
 
 enum ValidatorKind {
-    RequiredIfMain,
-    RequiredIfExternal,
+    RequiredIf(Box<Expr>),
     Custom {
         predicate: Box<Expr>,
         message: Box<Expr>,
@@ -129,13 +125,11 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
             } else if meta.path.is_ident("nested") {
                 parsed.nested = true;
                 Ok(())
-            } else if meta.path.is_ident("required_if_main") {
-                ensure_option_field(field, "required_if_main")?;
-                parsed.validators.push(ValidatorKind::RequiredIfMain);
-                Ok(())
-            } else if meta.path.is_ident("required_if_external") {
-                ensure_option_field(field, "required_if_external")?;
-                parsed.validators.push(ValidatorKind::RequiredIfExternal);
+            } else if meta.path.is_ident("required_if") {
+                ensure_option_field(field, "required_if")?;
+                parsed.validators.push(ValidatorKind::RequiredIf(Box::new(
+                    meta.value()?.parse::<Expr>()?,
+                )));
                 Ok(())
             } else if meta.path.is_ident("custom") {
                 let args = meta.input.parse::<ParenValidationArgs>()?;
@@ -233,13 +227,13 @@ impl Parse for ParenValidationArgs {
 /// #[config_validate(root)]
 /// pub struct Config {
 ///     pub general_config: GeneralConfig,
-///     #[config_validate(required_if_main)]
+///     #[config_validate(required_if = NodeRole::MainNode)]
 ///     pub external_price_api_client_config: Option<ExternalPriceApiClientConfig>,
 /// }
 ///
 /// #[derive(ConfigValidate)]
 /// pub struct GeneralConfig {
-///     #[config_validate(required_if_external)]
+///     #[config_validate(required_if = NodeRole::ExternalNode)]
 ///     pub main_node_rpc_url: Option<String>,
 /// }
 /// ```
@@ -280,26 +274,26 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
         let path_segment = field_attrs.path.unwrap_or(default_path);
 
         for validator in field_attrs.validators {
-            let (condition, message) = match validator {
-                ValidatorKind::RequiredIfMain => (
-                    quote! { !root.general_config.node_role.is_main() || self.#field_ident.is_some() },
-                    quote! { "is required when `general.node_role=main`" },
-                ),
-                ValidatorKind::RequiredIfExternal => (
-                    quote! { !root.general_config.node_role.is_external() || self.#field_ident.is_some() },
-                    quote! { "is required when `general.node_role=external`" },
-                ),
-                ValidatorKind::Custom { predicate, message } => (
-                    quote! { (#predicate)(root, &self.#field_ident) },
-                    quote! { #message },
-                ),
+            let validation = match validator {
+                ValidatorKind::RequiredIf(required_role) => quote! {
+                    let required_role = #required_role;
+                    if root.general_config.node_role == required_role && self.#field_ident.is_none() {
+                        let path = crate::config::join_validation_path(prefix, #path_segment);
+                        errors.push(format!(
+                            "`{}` is required when `general.node_role={}`",
+                            path,
+                            required_role,
+                        ));
+                    }
+                },
+                ValidatorKind::Custom { predicate, message } => quote! {
+                    if !((#predicate)(root, &self.#field_ident)) {
+                        let path = crate::config::join_validation_path(prefix, #path_segment);
+                        errors.push(format!("`{}` {}", path, #message));
+                    }
+                },
             };
-            field_validations.push(quote! {
-                if !(#condition) {
-                    let path = crate::config::join_validation_path(prefix, #path_segment);
-                    errors.push(format!("`{}` {}", path, #message));
-                }
-            });
+            field_validations.push(validation);
         }
 
         if should_recurse {

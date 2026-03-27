@@ -70,7 +70,7 @@ pub struct Config {
     pub interop_fee_updater_config: InteropFeeUpdaterConfig,
     /// Only required on the Main Node, where the base token price updater runs.
     /// External Nodes never start that component and may omit this config entirely.
-    #[config_validate(required_if_main, skip_nested)]
+    #[config_validate(required_if = NodeRole::MainNode, skip_nested)]
     pub external_price_api_client_config: Option<ExternalPriceApiClientConfig>,
     pub fee_config: FeeConfig,
 }
@@ -353,7 +353,7 @@ pub struct GeneralConfig {
     /// **IMPORTANT: It must be set for an external node. However, setting this DOES NOT make the node into an external node.
     /// [`GeneralConfig::node_role`] is the source of truth for node type. **
     #[config(default_t = None)]
-    #[config_validate(required_if_external)]
+    #[config_validate(required_if = NodeRole::ExternalNode)]
     pub main_node_rpc_url: Option<String>,
 
     /// Whether to run the priority tree component.
@@ -451,20 +451,20 @@ pub enum StateBackendConfig {
 pub struct GenesisConfig {
     /// L1 address of `Bridgehub` contract. This address and chain ID is an entrypoint into L1 discoverability so most
     /// other contracts should be discoverable through it.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     pub bridgehub_address: Option<Address>,
 
     /// L1 address of the `BytecodeSupplier` contract. This address right now cannot be discovered through `Bridgehub`,
     /// so it has to be provided explicitly.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     pub bytecode_supplier_address: Option<Address>,
 
     /// Chain ID of the chain node operates on.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     pub chain_id: Option<u64>,
 
     /// Path to the file with genesis input.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     pub genesis_input_path: Option<PathBuf>,
 }
 
@@ -664,21 +664,21 @@ pub struct L1SenderConfig {
     /// Signer to commit batches to L1.
     /// Must be consistent with the operator key set on the contract (permissioned!)
     /// Not required for External Nodes, which do not send L1 transactions.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     #[config(secret, alias = "operator_commit_pk", with = SignerConfigDeserializer)]
     pub operator_commit_sk: Option<SignerConfig>,
 
     /// Signer to submit proofs to L1.
     /// Can be arbitrary funded address - proof submission is permissionless.
     /// Not required for External Nodes, which do not send L1 transactions.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     #[config(secret, alias = "operator_prove_pk", with = SignerConfigDeserializer)]
     pub operator_prove_sk: Option<SignerConfig>,
 
     /// Signer to execute batches on L1.
     /// Can be arbitrary funded address - execute submission is permissionless.
     /// Not required for External Nodes, which do not send L1 transactions.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     #[config(secret, alias = "operator_execute_pk", with = SignerConfigDeserializer)]
     pub operator_execute_sk: Option<SignerConfig>,
 
@@ -718,7 +718,7 @@ pub struct L1SenderConfig {
 
     /// Pubdata mode is used by block-producing components on the Main Node.
     /// External Nodes only replay blocks, so they may leave this unset.
-    #[config_validate(required_if_main)]
+    #[config_validate(required_if = NodeRole::MainNode)]
     #[config(with = Serde![str])]
     pub pubdata_mode: Option<PubdataMode>,
 }
