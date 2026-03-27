@@ -25,7 +25,8 @@
 //!   and must return `bool`. The message is appended after the generated config path.
 //! - `async_validate(<validator>)`
 //!   Adds a custom async validator for a field on the root struct. The validator receives
-//!   `(&RootConfig, &FieldType, &mut Vec<String>)` and returns `anyhow::Result<()>`.
+//!   `(&RootConfig, &FieldType, &mut Vec<ValidationError>)` and returns
+//!   `anyhow::Result<()>`.
 //! - `nested`
 //!   Forces recursive validation for this field even if it does not match the default
 //!   recursion heuristics.
@@ -279,17 +280,16 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
                     let required_role = #required_role;
                     if root.general_config.node_role == required_role && self.#field_ident.is_none() {
                         let path = crate::config::join_validation_path(prefix, #path_segment);
-                        errors.push(format!(
-                            "`{}` is required when `general.node_role={}`",
+                        errors.push(crate::config::ValidationError::new(
                             path,
-                            required_role,
+                            format!("is required when `general.node_role={}`", required_role),
                         ));
                     }
                 },
                 ValidatorKind::Custom { predicate, message } => quote! {
                     if !((#predicate)(root, &self.#field_ident)) {
                         let path = crate::config::join_validation_path(prefix, #path_segment);
-                        errors.push(format!("`{}` {}", path, #message));
+                        errors.push(crate::config::ValidationError::new(path, #message));
                     }
                 },
             };
@@ -318,7 +318,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
         quote! {
             async fn validate_async(
                 &self,
-                errors: &mut ::std::vec::Vec<::std::string::String>,
+                errors: &mut ::std::vec::Vec<crate::config::ValidationError>,
             ) -> ::anyhow::Result<()> {
                 #(#async_field_validations)*
                 Ok(())
@@ -334,7 +334,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
             fn validate_conditional(
                 &self,
                 root: &crate::config::Config,
-                errors: &mut ::std::vec::Vec<::std::string::String>,
+                errors: &mut ::std::vec::Vec<crate::config::ValidationError>,
                 prefix: &str,
             ) {
                 #(#field_validations)*

@@ -77,9 +77,9 @@ pub struct Config {
 
 #[async_trait::async_trait(?Send)]
 pub trait ConfigValidate {
-    fn validate_conditional(&self, root: &Config, errors: &mut Vec<String>, prefix: &str);
+    fn validate_conditional(&self, root: &Config, errors: &mut Vec<ValidationError>, prefix: &str);
 
-    async fn validate_async(&self, _errors: &mut Vec<String>) -> anyhow::Result<()> {
+    async fn validate_async(&self, _errors: &mut Vec<ValidationError>) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -103,7 +103,7 @@ trait MaybeConditionalConfigValidator<T: ?Sized> {
         &self,
         value: &T,
         root: &Config,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<ValidationError>,
         prefix: &str,
     );
 }
@@ -115,7 +115,7 @@ impl<T: ConfigValidate + ?Sized> MaybeConditionalConfigValidator<T>
         &self,
         value: &T,
         root: &Config,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<ValidationError>,
         prefix: &str,
     ) {
         value.validate_conditional(root, errors, prefix);
@@ -127,9 +127,30 @@ impl<T: ?Sized> MaybeConditionalConfigValidator<T> for &std::marker::PhantomData
         &self,
         _value: &T,
         _root: &Config,
-        _errors: &mut Vec<String>,
+        _errors: &mut Vec<ValidationError>,
         _prefix: &str,
     ) {
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationError {
+    path: String,
+    message: String,
+}
+
+impl ValidationError {
+    pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}` {}", self.path, self.message)
     }
 }
 
@@ -141,7 +162,7 @@ pub(crate) fn join_validation_path(prefix: &str, segment: &str) -> String {
     }
 }
 
-pub(crate) fn format_validation_errors(prefix: &str, errors: &[String]) -> String {
+pub(crate) fn format_validation_errors(prefix: &str, errors: &[ValidationError]) -> String {
     let formatted_errors = errors
         .iter()
         .enumerate()
@@ -235,7 +256,7 @@ impl Config {
     async fn validate_operator_signers(
         root: &Self,
         l1_sender_config: &L1SenderConfig,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<ValidationError>,
     ) -> anyhow::Result<()> {
         if !root.general_config.node_role.is_main() {
             return Ok(());
@@ -254,8 +275,9 @@ impl Config {
         let commit_addr = match commit.address().await {
             Ok(address) => Some(address),
             Err(err) => {
-                errors.push(format!(
-                    "failed to resolve `l1_sender.operator_commit_sk`: {err}"
+                errors.push(ValidationError::new(
+                    "l1_sender.operator_commit_sk",
+                    format!("failed to resolve signer address: {err}"),
                 ));
                 None
             }
@@ -263,8 +285,9 @@ impl Config {
         let prove_addr = match prove.address().await {
             Ok(address) => Some(address),
             Err(err) => {
-                errors.push(format!(
-                    "failed to resolve `l1_sender.operator_prove_sk`: {err}"
+                errors.push(ValidationError::new(
+                    "l1_sender.operator_prove_sk",
+                    format!("failed to resolve signer address: {err}"),
                 ));
                 None
             }
@@ -272,8 +295,9 @@ impl Config {
         let execute_addr = match execute.address().await {
             Ok(address) => Some(address),
             Err(err) => {
-                errors.push(format!(
-                    "failed to resolve `l1_sender.operator_execute_sk`: {err}"
+                errors.push(ValidationError::new(
+                    "l1_sender.operator_execute_sk",
+                    format!("failed to resolve signer address: {err}"),
                 ));
                 None
             }
@@ -285,10 +309,13 @@ impl Config {
                 || prove_addr == execute_addr
                 || execute_addr == commit_addr)
         {
-            errors.push(format!(
-                "operator addresses for `l1_sender.operator_commit_sk`, \
-                 `l1_sender.operator_prove_sk`, and `l1_sender.operator_execute_sk` must be different; \
-                 got commit={commit_addr}, prove={prove_addr}, execute={execute_addr}"
+            errors.push(ValidationError::new(
+                "l1_sender.operator_commit_sk",
+                format!(
+                    "must be different from `l1_sender.operator_prove_sk` and \
+                     `l1_sender.operator_execute_sk`; got commit={commit_addr}, \
+                     prove={prove_addr}, execute={execute_addr}"
+                ),
             ));
         }
 
