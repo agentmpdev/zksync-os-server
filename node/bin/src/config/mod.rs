@@ -76,7 +76,7 @@ pub struct Config {
 }
 
 #[async_trait::async_trait(?Send)]
-pub trait ConditionalConfigValidator {
+pub trait ConfigValidate {
     fn validate_conditional(&self, root: &Config, errors: &mut Vec<String>, prefix: &str);
 
     async fn validate_async(&self, _errors: &mut Vec<String>) -> anyhow::Result<()> {
@@ -108,7 +108,7 @@ trait MaybeConditionalConfigValidator<T: ?Sized> {
     );
 }
 
-impl<T: ConditionalConfigValidator + ?Sized> MaybeConditionalConfigValidator<T>
+impl<T: ConfigValidate + ?Sized> MaybeConditionalConfigValidator<T>
     for std::marker::PhantomData<T>
 {
     fn maybe_validate_conditional(

@@ -10,7 +10,7 @@ use zksync_os_internal_config::InternalConfigManager;
 use zksync_os_metadata::NODE_VERSION;
 use zksync_os_observability::prometheus::PrometheusExporterConfig;
 use zksync_os_server::config::{
-    ConditionalConfigValidator, Config, ConfigArgs, ProofStorageConfig, RebuildBlocksConfig,
+    Config, ConfigArgs, ConfigValidate, ProofStorageConfig, RebuildBlocksConfig,
     StateBackendConfig, build_external_config, load_config_file_sources,
 };
 use zksync_os_server::default_protocol_version::{DEFAULT_ROCKS_DB_PATH, PROTOCOL_VERSION};

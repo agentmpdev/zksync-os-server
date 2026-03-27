@@ -1,9 +1,9 @@
 //! Declarative validation derive for the node's end configuration.
 //!
-//! `ConfigValidate` generates an implementation of
-//! `crate::config::ConditionalConfigValidator` for the annotated struct. When the
-//! struct is also marked with `#[config_validate(root)]`, the derive additionally
-//! wires root-level async validations into `ConditionalConfigValidator::validate()`,
+//! `ConfigValidate` generates an implementation of `crate::config::ConfigValidate`
+//! for the annotated struct. When the struct is also marked with
+//! `#[config_validate(root)]`, the derive additionally wires root-level async
+//! validations into `ConfigValidate::validate()`,
 //! which:
 //!
 //! - walks the config tree and collects synchronous validation errors
@@ -330,7 +330,7 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
     Ok(quote! {
         #[async_trait::async_trait(?Send)]
-        impl crate::config::ConditionalConfigValidator for #name {
+        impl crate::config::ConfigValidate for #name {
             fn validate_conditional(
                 &self,
                 root: &crate::config::Config,
