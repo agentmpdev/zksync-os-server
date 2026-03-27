@@ -206,17 +206,14 @@ impl Config {
             return Ok(());
         }
 
-        let commit = match &l1_sender_config.operator_commit_sk {
-            Some(signer) => signer,
-            None => return Ok(()),
+        let Some(commit) = &l1_sender_config.operator_commit_sk else {
+            return Ok(());
         };
-        let prove = match &l1_sender_config.operator_prove_sk {
-            Some(signer) => signer,
-            None => return Ok(()),
+        let Some(prove) = &l1_sender_config.operator_prove_sk else {
+            return Ok(());
         };
-        let execute = match &l1_sender_config.operator_execute_sk {
-            Some(signer) => signer,
-            None => return Ok(()),
+        let Some(execute) = &l1_sender_config.operator_execute_sk else {
+            return Ok(());
         };
 
         let commit_addr = match commit.address().await {
