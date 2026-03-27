@@ -3,7 +3,8 @@
 //! `ConfigValidate` generates an implementation of
 //! `crate::config::ConditionalConfigValidator` for the annotated struct. When the
 //! struct is also marked with `#[config_validate(root)]`, the derive additionally
-//! generates an async `validate()` method that:
+//! wires root-level async validations into `ConditionalConfigValidator::validate()`,
+//! which:
 //!
 //! - walks the config tree and collects synchronous validation errors
 //! - runs async field validators and lets them append more validation errors
@@ -12,7 +13,7 @@
 //! Supported `#[config_validate(...)]` forms on structs:
 //!
 //! - `root`
-//!   Marks the final top-level config struct and generates `validate()`.
+//!   Marks the final top-level config struct and enables `validate()`.
 //!
 //! Supported `#[config_validate(...)]` forms on fields:
 //!
@@ -307,12 +308,34 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
         for validator in field_attrs.async_validators {
             async_field_validations.push(quote! {
-                (#validator)(self, &self.#field_ident, &mut errors).await?;
+                (#validator)(self, &self.#field_ident, errors).await?;
             });
         }
     }
 
-    let validator_impl = quote! {
+    if !struct_attrs.root && !async_field_validations.is_empty() {
+        return Err(syn::Error::new(
+            name.span(),
+            "`async_validate` can only be used on the root config struct",
+        ));
+    }
+
+    let validate_async_method = if struct_attrs.root {
+        quote! {
+            async fn validate_async(
+                &self,
+                errors: &mut ::std::vec::Vec<::std::string::String>,
+            ) -> ::anyhow::Result<()> {
+                #(#async_field_validations)*
+                Ok(())
+            }
+        }
+    } else {
+        proc_macro2::TokenStream::new()
+    };
+
+    Ok(quote! {
+        #[async_trait::async_trait(?Send)]
         impl crate::config::ConditionalConfigValidator for #name {
             fn validate_conditional(
                 &self,
@@ -323,42 +346,9 @@ fn expand(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
                 #(#field_validations)*
                 #(#nested_validations)*
             }
+
+            #validate_async_method
         }
-    };
-
-    if !struct_attrs.root && !async_field_validations.is_empty() {
-        return Err(syn::Error::new(
-            name.span(),
-            "`async_validate` can only be used on the root config struct",
-        ));
-    }
-
-    let validate_method = if struct_attrs.root {
-        quote! {
-            impl #name {
-                pub async fn validate(&self) -> ::anyhow::Result<()> {
-                    let mut errors = ::std::vec::Vec::new();
-                    <Self as crate::config::ConditionalConfigValidator>::validate_conditional(
-                        self,
-                        self,
-                        &mut errors,
-                        "",
-                    );
-                    #(#async_field_validations)*
-                    if !errors.is_empty() {
-                        ::anyhow::bail!(crate::config::format_validation_errors("invalid config", &errors));
-                    }
-                    Ok(())
-                }
-            }
-        }
-    } else {
-        proc_macro2::TokenStream::new()
-    };
-
-    Ok(quote! {
-        #validator_impl
-        #validate_method
     })
 }
 

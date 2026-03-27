@@ -75,8 +75,27 @@ pub struct Config {
     pub fee_config: FeeConfig,
 }
 
-pub(crate) trait ConditionalConfigValidator {
+#[async_trait::async_trait(?Send)]
+pub trait ConditionalConfigValidator {
     fn validate_conditional(&self, root: &Config, errors: &mut Vec<String>, prefix: &str);
+
+    async fn validate_async(&self, _errors: &mut Vec<String>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn validate(&self) -> anyhow::Result<()>
+    where
+        Self: Sized + std::borrow::Borrow<Config>,
+    {
+        let root = self.borrow();
+        let mut errors = Vec::new();
+        Self::validate_conditional(self, root, &mut errors, "");
+        self.validate_async(&mut errors).await?;
+        if !errors.is_empty() {
+            anyhow::bail!(format_validation_errors("invalid config", &errors));
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn join_validation_path(prefix: &str, segment: &str) -> String {
